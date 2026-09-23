@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="inputDraft" type="id" />
+    <item name="organizeButton" type="id" />
+    <item name="shoppingListContainer" type="id" />
+    <item name="imageGrid" type="id" />
+    <item name="imageSearchSwitch" type="id" />
+    <item name="apiKeyInput" type="id" />
+    <item name="currentListTitle" type="id" />
+    <item name="listHistoryButton" type="id" />
+    <item name="addDraftButton" type="id" />
+    <item name="clearDraftButton" type="id" />
+    <item name="saveAndNewListButton" type="id" />
+    <item name="clearWholeListButton" type="id" />
+    <item name="aiProviderSelector" type="id" />
+    <item name="geminiProviderOption" type="id" />
+    <item name="deepSeekProviderOption" type="id" />
+</resources>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">採買清單新版</string>
+    <string name="default_list_name">採買清單</string>
+    <string name="current_list">目前清單：%1$s</string>
+    <string name="list_history">清單紀錄</string>
+    <string name="add_text_to_list">加入清單</string>
+    <string name="clear_text">清除文字</string>
+    <string name="ai_organize_add">AI 整理並加入</string>
+    <string name="save_and_new_list">儲存並開新清單</string>
+    <string name="clear_whole_list">清除整張清單</string>
+    <string name="provider_gemini">Gemini（預設）</string>
+    <string name="provider_deepseek">DeepSeek</string>
+</resources>

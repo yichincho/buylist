@@ -1,2 +1,32 @@
-# buylist
-採買清單
+# buylist｜採買清單 Android App
+
+給 Android 手機使用的本機採買清單。v0.2.2 可把家人或同事提供的文字與截圖辨識品項追加到同一張清單，不記錄提出者，也不自動刪除重複品項。
+
+## 清單操作
+
+- **加入清單**：離線拆分輸入文字並追加到目前清單；加入後清空輸入框。
+- **清除文字**：只清空尚未加入的輸入文字，不影響清單品項或圖片。
+- **AI 整理並加入**：使用所選 AI 整理文字後追加品項；失敗時改用本機解析。
+- **清單紀錄**：切換到舊清單，查看每張清單的品項與圖片數量，或確認後刪除。
+- **儲存並開新清單**：保留目前清單，立即建立並切換到空白清單。
+- **清除整張清單**：確認後清除目前清單的所有品項、圖片和未加入文字。
+
+品項、勾選狀態、圖片和輸入草稿都保存在手機本機。一般參考圖片不會上傳；只有使用者明確啟動截圖辨識時，該張截圖才會傳給目前選用的 AI。
+
+## AI 與 API Key
+
+Gemini 是預設服務，模型為 `gemini-3.1-flash-lite`；也可切換至 DeepSeek。請每位使用者在「設定」頁輸入自己的 API Key。App 不附共用 Key，並使用 Android Keystore 與 AES-GCM 分別加密保存兩個服務的金鑰。升級 v0.2.1 時，舊 DeepSeek Key 仍可讀取。
+
+沒有 API Key 或網路時，「加入清單」仍可使用本機解析。Gemini 的可用模型、免費方案與配額依 Google 當前政策及專案設定而異。
+
+## 建置
+
+需要 Android SDK 36、Build Tools 36.0.0 與 JDK 17：
+
+```bash
+ANDROID_SDK_ROOT=/path/to/android-sdk bash scripts/build-apk.sh
+```
+
+APK 輸出到 `build/outputs/apk/debug/app-debug.apk`。此來源沿用精簡 Java/SQLite 結構，沒有 Gradle wrapper。建置出的 application ID 為 `tw.yc.smartshopping.direct`，沿用 v0.2.1 的不衝突安裝 ID。
+
+完整的小米 MIX 2 手機驗收步驟在 [`docs/testing/xiaomi-mix2-checklist.md`](docs/testing/xiaomi-mix2-checklist.md)。

@@ -1,0 +1,14 @@
+build/
+android-sdk/
+toolchains/
+*.jks
+*.keystore
+.keys/
+.idea/
+.codex/
+local.properties
+
+.worktrees/
+dist/
+__pycache__/
+*.pyc
