@@ -25,7 +25,8 @@ public final class LocalParser {
                 quantity = matcher.group(2).trim();
             }
             String store = value.contains("好市多") || value.toLowerCase().contains("costco") ? "好市多"
-                    : value.contains("全聯") ? "全聯" : "未指定";
+                    : value.contains("全聯") ? "全聯"
+                    : value.contains("菜市場") ? "菜市場" : "未指定";
             result.add(new ItemDraft(value, quantity, store, "其他", index++));
         }
         return result;
