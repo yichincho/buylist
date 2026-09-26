@@ -46,20 +46,6 @@ public final class ShoppingListModel {
         return order;
     }
 
-    public static boolean canMove(List<String> groupKeys, int position, int direction) {
-        int target = position + direction;
-        return position >= 0 && position < groupKeys.size() && target >= 0 && target < groupKeys.size()
-                && groupKeys.get(position).equals(groupKeys.get(target));
-    }
-
-    /** Swaps a row with its neighbour in the same group; both lists must already be in display order. */
-    public static boolean moveWithinGroup(List<Long> ids, List<String> groupKeys, int position, int direction) {
-        if (!canMove(groupKeys, position, direction)) return false;
-        Collections.swap(ids, position, position + direction);
-        Collections.swap(groupKeys, position, position + direction);
-        return true;
-    }
-
     public static String normalizeStore(String store) {
         String value = store == null ? "" : store.trim();
         return value.isEmpty() ? UNASSIGNED_STORE : value;

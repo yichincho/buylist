@@ -25,7 +25,12 @@ public final class ShoppingListWorkflow {
     }
 
     public int addText(String text) {
-        List<LocalParser.ItemDraft> items = LocalParser.parse(text);
+        return addText(text, Collections.<String>emptyList(), null);
+    }
+
+    /** Adds parsed text; a non-blank chosenStore overrides the store of every item. */
+    public int addText(String text, List<String> knownStores, String chosenStore) {
+        List<LocalParser.ItemDraft> items = LocalParser.withStore(LocalParser.parse(text, knownStores), chosenStore);
         if (items.isEmpty()) return 0;
         store.appendItems(activeListId, items);
         return items.size();

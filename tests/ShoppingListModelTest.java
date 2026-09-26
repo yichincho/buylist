@@ -1,6 +1,5 @@
 package tw.yc.smartshopping;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.TimeZone;
@@ -14,7 +13,6 @@ public final class ShoppingListModelTest {
             testAppendOrderFollowsLastSurvivingRow();
             testDraftClearsOnlyAfterSuccessfulAppend();
             testGroupedOrderKeepsFirstAppearance();
-            testMoveStaysInsideGroup();
             testStoreOptions();
             System.out.println("ShoppingListModelTest PASS");
         } finally {
@@ -37,17 +35,6 @@ public final class ShoppingListModelTest {
     private static void testGroupedOrderKeepsFirstAppearance() {
         List<String> keys = Arrays.asList("全聯", "好市多", "全聯", "未指定", "好市多");
         assertEquals(Arrays.asList(0, 2, 1, 4, 3), ShoppingListModel.groupedOrder(keys));
-    }
-
-    private static void testMoveStaysInsideGroup() {
-        List<Long> ids = new ArrayList<>(Arrays.asList(1L, 2L, 3L, 4L));
-        List<String> keys = new ArrayList<>(Arrays.asList("A", "A", "B", "B"));
-        assertFalse(ShoppingListModel.moveWithinGroup(ids, keys, 0, -1));
-        assertFalse(ShoppingListModel.moveWithinGroup(ids, keys, 1, 1));
-        assertTrue(ShoppingListModel.moveWithinGroup(ids, keys, 1, -1));
-        assertEquals(Arrays.asList(2L, 1L, 3L, 4L), ids);
-        assertTrue(ShoppingListModel.moveWithinGroup(ids, keys, 2, 1));
-        assertEquals(Arrays.asList(2L, 1L, 4L, 3L), ids);
     }
 
     private static void testStoreOptions() {
