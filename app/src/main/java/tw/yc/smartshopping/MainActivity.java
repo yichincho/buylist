@@ -442,9 +442,13 @@ public final class MainActivity extends Activity {
         final long listId = activeListId();
         List<ShoppingDb.Item> stored = db.items(listId);
         List<String> storedKeys = new ArrayList<>();
-        for (ShoppingDb.Item item : stored) storedKeys.add(groupKey(item));
+        List<Boolean> storedDone = new ArrayList<>();
+        for (ShoppingDb.Item item : stored) {
+            storedKeys.add(groupKey(item));
+            storedDone.add(item.done);
+        }
         final List<ShoppingDb.Item> items = new ArrayList<>();
-        for (int index : ShoppingListModel.groupedOrder(storedKeys)) items.add(stored.get(index));
+        for (int index : ShoppingListModel.groupedOrder(storedKeys, storedDone)) items.add(stored.get(index));
         final List<String> keys = new ArrayList<>();
         for (ShoppingDb.Item item : items) keys.add(groupKey(item));
 
@@ -461,7 +465,8 @@ public final class MainActivity extends Activity {
             row.setGravity(Gravity.CENTER_VERTICAL);
             row.setBackgroundColor(position % 2 == 0 ? Color.rgb(255, 248, 231) : Color.rgb(230, 242, 250));
             row.setPadding(0, dp(2), 0, dp(2));
-            row.setTag(new DragListLayout.Row(item.id, keys.get(position)));
+            // Checked items stay below unchecked ones, so each can only be dragged among its own kind.
+            row.setTag(new DragListLayout.Row(item.id, keys.get(position) + (item.done ? "｜done" : "")));
 
             FrameLayout checkArea = new FrameLayout(this);
             CheckBox check = new CheckBox(this);
@@ -518,7 +523,7 @@ public final class MainActivity extends Activity {
             listContainer.addView(row, matchWrap());
         }
         if (items.isEmpty()) listContainer.addView(label("尚無品項，可輸入文字後按「加入清單」。"));
-        else listContainer.addView(label("按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；點品項可編輯、改賣場或刪除。"));
+        else listContainer.addView(label("已勾選的品項會自動排到該賣場最下面。按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；點品項可編輯、改賣場或刪除。"));
         listContainer.setOnReorderListener(ids -> {
             db.reorderItems(listId, ids);
             if (activeListId() == listId) renderItems();

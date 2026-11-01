@@ -35,6 +35,8 @@ public final class ShoppingListModelTest {
     private static void testGroupedOrderKeepsFirstAppearance() {
         List<String> keys = Arrays.asList("全聯", "好市多", "全聯", "未指定", "好市多");
         assertEquals(Arrays.asList(0, 2, 1, 4, 3), ShoppingListModel.groupedOrder(keys));
+        List<Boolean> done = Arrays.asList(true, false, false, false, true);
+        assertEquals(Arrays.asList(2, 0, 1, 4, 3), ShoppingListModel.groupedOrder(keys, done));
     }
 
     private static void testStoreOptions() {

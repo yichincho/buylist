@@ -32,6 +32,11 @@ public final class ShoppingListModel {
 
     /** Indices of rows ordered by group (first appearance), keeping the original order inside each group. */
     public static List<Integer> groupedOrder(List<String> groupKeys) {
+        return groupedOrder(groupKeys, null);
+    }
+
+    /** Like {@link #groupedOrder(List)}, but inside each group unchecked rows come first and checked rows last. */
+    public static List<Integer> groupedOrder(List<String> groupKeys, List<Boolean> done) {
         Map<String, List<Integer>> groups = new LinkedHashMap<>();
         for (int i = 0; i < groupKeys.size(); i++) {
             List<Integer> group = groups.get(groupKeys.get(i));
@@ -42,7 +47,14 @@ public final class ShoppingListModel {
             group.add(i);
         }
         List<Integer> order = new ArrayList<>();
-        for (List<Integer> group : groups.values()) order.addAll(group);
+        for (List<Integer> group : groups.values()) {
+            if (done == null) {
+                order.addAll(group);
+                continue;
+            }
+            for (int index : group) if (!done.get(index)) order.add(index);
+            for (int index : group) if (done.get(index)) order.add(index);
+        }
         return order;
     }
 
