@@ -1,0 +1,132 @@
+name: AI auto-merge
+
+# Only trusted, same-repository Claude/Codex branches owned by yichincho.
+# No PR code is checked out or executed by this privileged workflow.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+  status:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+  actions: write
+
+concurrency:
+  group: ai-auto-merge
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    name: AI auto-merge
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.user.login == github.repository_owner &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !github.event.pull_request.draft &&
+       (startsWith(github.event.pull_request.head.ref, 'claude/') ||
+        startsWith(github.event.pull_request.head.ref, 'codex/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check CI, merge matching head, and start existing builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          POST_MERGE_WORKFLOWS: ""
+        shell: bash
+        run: |
+          node <<'NODE'
+          const NAME = 'AI auto-merge';
+          function eligible(pr, repo, branch) {
+            return pr.state === 'open' && !pr.draft && pr.user?.login === repo.split('/')[0]
+              && pr.head?.repo?.full_name === repo && /^(claude|codex)\/.+/.test(pr.head.ref)
+              && pr.base?.ref === branch;
+          }
+          function checksPass(checks, statuses, runs) {
+            const ok = new Set(['success', 'neutral', 'skipped']);
+            return checks.filter(c => c.name !== NAME).every(c => c.status === 'completed' && ok.has(c.conclusion))
+              && statuses.every(s => s.state === 'success')
+              && runs.filter(r => r.name !== NAME).every(r => r.status === 'completed' && ok.has(r.conclusion));
+          }
+          async function main() {
+            const fs = require('node:fs');
+            const repo = process.env.GITHUB_REPOSITORY;
+            if (!/^yichincho\/[A-Za-z0-9_.-]+$/.test(repo || '')) throw new Error('Unexpected repository');
+            const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+            const root = '/repos/' + repo;
+            async function api(path, method = 'GET', body) {
+              const response = await fetch('https://api.github.com' + path, {
+                method, headers: {Authorization: 'Bearer ' + process.env.GH_TOKEN,
+                  Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json'}, body: body === undefined ? undefined : JSON.stringify(body)
+              });
+              const text = await response.text();
+              const data = text ? JSON.parse(text) : null;
+              if (!response.ok) throw new Error(method + ' ' + path + ': ' + response.status + ' ' + (data?.message || 'API error'));
+              return data;
+            }
+            async function pages(path, key) {
+              const out = [];
+              for (let page = 1; ; page++) {
+                const data = await api(path + (path.includes('?') ? '&' : '?') + 'per_page=100&page=' + page);
+                const items = key ? data[key] : data;
+                if (!Array.isArray(items)) throw new Error('Unexpected API response');
+                out.push(...items);
+                if (items.length < 100) return out;
+              }
+            }
+            const metadata = await api(root);
+            const branch = metadata.default_branch;
+            const candidates = event.pull_request ? [event.pull_request] : await pages(root + '/pulls?state=open');
+            const relevant = candidates.filter(p => eligible(p, repo, branch));
+            if (!relevant.length) { console.log('No eligible Claude/Codex PRs.'); return; }
+            // Give newly triggered CI time to register before inspecting its state.
+            if (process.env.GITHUB_EVENT_NAME === 'pull_request_target') await new Promise(r => setTimeout(r, 30000));
+            for (const candidate of relevant) {
+              const pr = await api(root + '/pulls/' + candidate.number);
+              if (!eligible(pr, repo, branch)) continue;
+              if (!pr.mergeable || !['clean', 'unstable', 'has_hooks'].includes(pr.mergeable_state)) {
+                console.log('#' + pr.number + ': waiting for GitHub merge requirements (' + pr.mergeable_state + ')');
+                continue;
+              }
+              const refs = [...new Set([pr.head.sha, pr.merge_commit_sha].filter(Boolean))];
+              const checks = [], statuses = [], runs = [];
+              for (const sha of refs) {
+                checks.push(...await pages(root + '/commits/' + sha + '/check-runs?filter=latest', 'check_runs'));
+                const status = await api(root + '/commits/' + sha + '/status?per_page=100');
+                if (status.total_count > 100) throw new Error('Too many status contexts; refusing an incomplete check');
+                statuses.push(...status.statuses);
+                const allRuns = await pages(root + '/actions/runs?head_sha=' + sha, 'workflow_runs');
+                const latest = new Map();
+                for (const run of allRuns) {
+                  const key = run.workflow_id + ':' + run.event + ':' + run.head_branch;
+                  if (!latest.has(key)) latest.set(key, run);
+                }
+                runs.push(...latest.values());
+              }
+              if (!checksPass(checks, statuses, runs)) {
+                console.log('#' + pr.number + ': CI pending or failed; will retry when a workflow completes.');
+                continue;
+              }
+              const current = await api(root + '/pulls/' + pr.number);
+              if (!eligible(current, repo, branch) || current.head.sha !== pr.head.sha || current.base.sha !== pr.base.sha) {
+                console.log('#' + pr.number + ': changed while checking; waiting for a fresh run.'); continue;
+              }
+              const method = metadata.allow_squash_merge ? 'squash' : metadata.allow_merge_commit ? 'merge' : 'rebase';
+              // GitHub enforces branch rules. Matching SHA prevents merging a newly pushed, unchecked head.
+              const result = await api(root + '/pulls/' + pr.number + '/merge', 'PUT', {sha: pr.head.sha, merge_method: method});
+              if (!result.merged) throw new Error('GitHub did not merge #' + pr.number);
+              console.log('Merged #' + pr.number + ' at ' + result.sha);
+              // GITHUB_TOKEN merges do not emit push workflow runs. Explicitly dispatch existing builds.
+              for (const file of (process.env.POST_MERGE_WORKFLOWS || '').split(',').filter(Boolean)) {
+                await api(root + '/actions/workflows/' + encodeURIComponent(file) + '/dispatches', 'POST', {ref: branch});
+                console.log('Dispatched ' + file + ' on ' + branch);
+              }
+            }
+          }
+          module.exports = {eligible, checksPass};
+          main().catch(e => {console.error(e.message); process.exitCode = 1;});
+          NODE
