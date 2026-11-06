@@ -4,6 +4,7 @@ import android.content.Context;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewParent;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -12,10 +13,12 @@ import java.util.List;
 
 /**
  * Vertical list whose item rows can be dragged to a new position inside their own group.
+ * Rows can also be swiped sideways to delete them.
  * Rows that take part carry a {@link Row} tag; group headers and other views do not.
  */
 public final class DragListLayout extends LinearLayout {
     public interface OnReorderListener { void onReorder(List<Long> orderedIds); }
+    public interface OnSwipeListener { void onSwipe(long id); }
 
     public static final class Row {
         public final long id;
@@ -24,6 +27,11 @@ public final class DragListLayout extends LinearLayout {
     }
 
     private OnReorderListener listener;
+    private OnSwipeListener swipeListener;
+    private View swiped;
+    private View swipeCandidate;
+    private float downX;
+    private float downY;
     private View dragged;
     private float lastY;
     private boolean moved;
@@ -34,6 +42,7 @@ public final class DragListLayout extends LinearLayout {
     }
 
     public void setOnReorderListener(OnReorderListener listener) { this.listener = listener; }
+    public void setOnSwipeListener(OnSwipeListener listener) { this.swipeListener = listener; }
 
     public boolean isDragging() { return dragged != null; }
 
@@ -53,7 +62,7 @@ public final class DragListLayout extends LinearLayout {
     }
 
     @Override public boolean onInterceptTouchEvent(MotionEvent event) {
-        if (dragged == null) return super.onInterceptTouchEvent(event);
+        if (dragged == null) return interceptSwipe(event) || super.onInterceptTouchEvent(event);
         int action = event.getActionMasked();
         // An intercepted event never reaches onTouchEvent, so a release without movement ends the drag here.
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) finishDrag();
@@ -61,6 +70,7 @@ public final class DragListLayout extends LinearLayout {
     }
 
     @Override public boolean onTouchEvent(MotionEvent event) {
+        if (swiped != null) return handleSwipe(event);
         if (dragged == null) return super.onTouchEvent(event);
         switch (event.getActionMasked()) {
             case MotionEvent.ACTION_MOVE:
@@ -77,6 +87,68 @@ public final class DragListLayout extends LinearLayout {
             default:
                 return true;
         }
+    }
+
+    /** Watches touches on rows and takes over once the finger moves clearly sideways. */
+    private boolean interceptSwipe(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = event.getX();
+                downY = event.getY();
+                swipeCandidate = rowAt(downY);
+                return false;
+            case MotionEvent.ACTION_MOVE:
+                if (swipeCandidate == null || swipeListener == null) return false;
+                float dx = event.getX() - downX;
+                float dy = event.getY() - downY;
+                int slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+                if (Math.abs(dx) > slop * 2 && Math.abs(dx) > Math.abs(dy) * 2) {
+                    swiped = swipeCandidate;
+                    swipeCandidate = null;
+                    ViewParent parent = getParent();
+                    if (parent != null) parent.requestDisallowInterceptTouchEvent(true);
+                    return true;
+                }
+                return false;
+            default:
+                swipeCandidate = null;
+                return false;
+        }
+    }
+
+    private boolean handleSwipe(MotionEvent event) {
+        float dx = event.getX() - downX;
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_MOVE:
+                swiped.setTranslationX(dx);
+                swiped.setAlpha(Math.max(.25f, 1f - Math.abs(dx) / getWidth()));
+                return true;
+            case MotionEvent.ACTION_UP:
+                final View row = swiped;
+                swiped = null;
+                if (Math.abs(dx) > getWidth() * .35f) {
+                    final long id = ((Row) row.getTag()).id;
+                    row.animate().translationX(dx > 0 ? getWidth() : -getWidth()).alpha(0f).setDuration(150)
+                            .withEndAction(() -> { if (swipeListener != null) swipeListener.onSwipe(id); }).start();
+                } else {
+                    row.animate().translationX(0).alpha(1f).setDuration(150).start();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                swiped.animate().translationX(0).alpha(1f).setDuration(150).start();
+                swiped = null;
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    private View rowAt(float y) {
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child.getTag() instanceof Row && y >= child.getTop() && y < child.getBottom()) return child;
+        }
+        return null;
     }
 
     private void swapWithNeighbours() {

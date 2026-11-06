@@ -58,6 +58,10 @@ public final class MainActivity extends Activity {
     private String chosenStore;
     private GridLayout imageGrid;
     private TextView status;
+    private LinearLayout undoBar;
+    private TextView undoText;
+    private Runnable undoAction;
+    private final Runnable hideUndo = () -> showUndo(null, null);
     private TextView currentListLabel;
     private ShoppingDb db;
     private SecureKeyStore keyStore;
@@ -193,6 +197,21 @@ public final class MainActivity extends Activity {
         root.addView(title("購物項目", 22));
         listContainer = new DragListLayout(this);
         listContainer.setId(R.id.shoppingListContainer);
+        undoBar = row();
+        undoBar.setGravity(Gravity.CENTER_VERTICAL);
+        undoBar.setBackgroundColor(Color.rgb(60, 60, 60));
+        undoText = label("");
+        undoText.setTextColor(Color.WHITE);
+        undoBar.addView(undoText, new LinearLayout.LayoutParams(0, -2, 1));
+        Button undo = compactButton("復原");
+        undoBar.addView(undo, new LinearLayout.LayoutParams(-2, dp(44)));
+        undo.setOnClickListener(v -> {
+            Runnable action = undoAction;
+            showUndo(null, null);
+            if (action != null) action.run();
+        });
+        undoBar.setVisibility(View.GONE);
+        root.addView(undoBar, matchWrap());
         root.addView(listContainer, matchWrap());
 
         root.addView(title("商品圖片（不必對應品項）", 22));
@@ -523,7 +542,10 @@ public final class MainActivity extends Activity {
             listContainer.addView(row, matchWrap());
         }
         if (items.isEmpty()) listContainer.addView(label("尚無品項，可輸入文字後按「加入清單」。"));
-        else listContainer.addView(label("已勾選的品項會自動排到該賣場最下面。按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；點品項可編輯、改賣場或刪除。"));
+        else listContainer.addView(label("已勾選的品項會自動排到該賣場最下面。按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；左右滑動品項可刪除（可按「復原」）；點品項可編輯或改賣場。"));
+        listContainer.setOnSwipeListener(id -> {
+            for (ShoppingDb.Item item : items) if (item.id == id) deleteWithUndo(item, listId);
+        });
         listContainer.setOnReorderListener(ids -> {
             db.reorderItems(listId, ids);
             if (activeListId() == listId) renderItems();
@@ -738,6 +760,27 @@ public final class MainActivity extends Activity {
                         renderItems();
                     }
                 }).setNegativeButton("取消", null).show();
+    }
+
+    private void deleteWithUndo(ShoppingDb.Item item, long listId) {
+        db.deleteItem(listId, item.id);
+        if (activeListId() == listId) renderItems();
+        showUndo("已刪除「" + item.name + "」", () -> {
+            db.restoreItem(listId, item);
+            if (activeListId() == listId) renderItems();
+        });
+    }
+
+    private void showUndo(String message, Runnable action) {
+        undoBar.removeCallbacks(hideUndo);
+        undoAction = action;
+        if (message == null) {
+            undoBar.setVisibility(View.GONE);
+            return;
+        }
+        undoText.setText(message);
+        undoBar.setVisibility(View.VISIBLE);
+        undoBar.postDelayed(hideUndo, 8000);
     }
 
     private void confirmDeleteItem(ShoppingDb.Item item, long listId) {

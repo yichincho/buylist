@@ -203,6 +203,21 @@ public final class ShoppingDb extends SQLiteOpenHelper {
         updateListTime(db, listId);
     }
 
+    /** Puts back an item removed with deleteItem, keeping its id, position and checked state. */
+    public synchronized void restoreItem(long listId, Item item) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            requireList(db, listId);
+            ContentValues v = new ContentValues();
+            v.put("id", item.id); v.put("name", item.name); v.put("quantity", item.quantity); v.put("store", item.store);
+            v.put("category", item.category); v.put("sort_order", item.order); v.put("done", item.done ? 1 : 0); v.put("list_id", listId);
+            db.insertWithOnConflict("items", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+            updateListTime(db, listId);
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+
     public synchronized List<ImageRow> images() { return images(1L); }
 
     public synchronized List<ImageRow> images(long listId) {
