@@ -19,13 +19,17 @@ import android.speech.RecognizerIntent;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -49,9 +53,15 @@ public final class MainActivity extends Activity {
     private static final String PREF_LEGACY_DRAFT_MIGRATED = "legacy_draft_migrated";
 
     private EditText draft;
-    private LinearLayout listContainer;
+    private DragListLayout listContainer;
+    private LinearLayout storeChoices;
+    private String chosenStore;
     private GridLayout imageGrid;
     private TextView status;
+    private LinearLayout undoBar;
+    private TextView undoText;
+    private Runnable undoAction;
+    private final Runnable hideUndo = () -> showUndo(null, null);
     private TextView currentListLabel;
     private ShoppingDb db;
     private SecureKeyStore keyStore;
@@ -148,6 +158,14 @@ public final class MainActivity extends Activity {
             @Override public void afterTextChanged(Editable editable) {}
         });
 
+        TextView storeLabel = label("這次加入的品項要放到哪個賣場？（自動判斷：依文字中的賣場名稱）");
+        root.addView(storeLabel, matchWrap());
+        HorizontalScrollView storeScroll = new HorizontalScrollView(this);
+        storeScroll.setHorizontalScrollBarEnabled(false);
+        storeChoices = row();
+        storeScroll.addView(storeChoices);
+        root.addView(storeScroll, matchWrap());
+
         LinearLayout inputActions = row();
         Button paste = button("貼上文字");
         Button voice = button("🎤 語音輸入");
@@ -177,8 +195,23 @@ public final class MainActivity extends Activity {
         root.addView(status, matchWrap());
 
         root.addView(title("購物項目", 22));
-        listContainer = column();
+        listContainer = new DragListLayout(this);
         listContainer.setId(R.id.shoppingListContainer);
+        undoBar = row();
+        undoBar.setGravity(Gravity.CENTER_VERTICAL);
+        undoBar.setBackgroundColor(Color.rgb(60, 60, 60));
+        undoText = label("");
+        undoText.setTextColor(Color.WHITE);
+        undoBar.addView(undoText, new LinearLayout.LayoutParams(0, -2, 1));
+        Button undo = compactButton("復原");
+        undoBar.addView(undo, new LinearLayout.LayoutParams(-2, dp(44)));
+        undo.setOnClickListener(v -> {
+            Runnable action = undoAction;
+            showUndo(null, null);
+            if (action != null) action.run();
+        });
+        undoBar.setVisibility(View.GONE);
+        root.addView(undoBar, matchWrap());
         root.addView(listContainer, matchWrap());
 
         root.addView(title("商品圖片（不必對應品項）", 22));
@@ -228,7 +261,7 @@ public final class MainActivity extends Activity {
             return;
         }
         try {
-            int count = listWorkflow.addText(text);
+            int count = listWorkflow.addText(text, knownStores(), chosenStore);
             if (count == 0) {
                 toast("沒有可加入的品項");
                 return;
@@ -254,6 +287,7 @@ public final class MainActivity extends Activity {
         }
         final long targetListId = activeListId();
         final AiProvider targetProvider = selectedProvider();
+        final String targetStore = chosenStore;
         button.setEnabled(false);
         status.setText("正在整理…");
         executor.execute(() -> {
@@ -265,7 +299,7 @@ public final class MainActivity extends Activity {
             boolean appendSucceeded = false;
             if (!result.items.isEmpty()) {
                 try {
-                    db.appendItems(targetListId, result.items);
+                    db.appendItems(targetListId, LocalParser.withStore(result.items, targetStore));
                     appendSucceeded = true;
                 } catch (RuntimeException error) {
                     saveError = "加入清單失敗，輸入文字已保留";
@@ -417,6 +451,7 @@ public final class MainActivity extends Activity {
 
     private void render() {
         updateCurrentListLabel();
+        renderStoreChoices();
         renderItems();
         renderImages();
     }
@@ -424,48 +459,221 @@ public final class MainActivity extends Activity {
     private void renderItems() {
         listContainer.removeAllViews();
         final long listId = activeListId();
-        List<ShoppingDb.Item> items = db.items(listId);
+        List<ShoppingDb.Item> stored = db.items(listId);
+        List<String> storedKeys = new ArrayList<>();
+        List<Boolean> storedDone = new ArrayList<>();
+        for (ShoppingDb.Item item : stored) {
+            storedKeys.add(groupKey(item));
+            storedDone.add(item.done);
+        }
+        final List<ShoppingDb.Item> items = new ArrayList<>();
+        for (int index : ShoppingListModel.groupedOrder(storedKeys, storedDone)) items.add(stored.get(index));
+        final List<String> keys = new ArrayList<>();
+        for (ShoppingDb.Item item : items) keys.add(groupKey(item));
+
         String group = "";
-        int number = 1;
         boolean search = getSharedPreferences("shopping_settings", MODE_PRIVATE).getBoolean("image_search_enabled", false);
-        for (ShoppingDb.Item item : items) {
-            String next = item.store + "｜" + item.category;
-            if (!next.equals(group)) {
-                TextView heading = title(next, 17);
-                heading.setBackgroundColor(Color.rgb(232, 243, 231));
-                heading.setPadding(dp(10), dp(8), dp(10), dp(8));
-                listContainer.addView(heading, matchWrap());
-                group = next;
+        for (int position = 0; position < items.size(); position++) {
+            final ShoppingDb.Item item = items.get(position);
+            final int number = position + 1;
+            if (!keys.get(position).equals(group)) {
+                listContainer.addView(groupHeader(item, listId), matchWrap());
+                group = keys.get(position);
             }
             LinearLayout row = row();
             row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackgroundColor(position % 2 == 0 ? Color.rgb(255, 248, 231) : Color.rgb(230, 242, 250));
+            row.setPadding(0, dp(2), 0, dp(2));
+            // Checked items stay below unchecked ones, so each can only be dragged among its own kind.
+            row.setTag(new DragListLayout.Row(item.id, keys.get(position) + (item.done ? "｜done" : "")));
+
+            FrameLayout checkArea = new FrameLayout(this);
             CheckBox check = new CheckBox(this);
             check.setChecked(item.done);
+            check.setScaleX(1.6f);
+            check.setScaleY(1.6f);
             check.setContentDescription("商品 " + number + " 完成狀態");
-            row.addView(check);
+            checkArea.addView(check, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+            checkArea.setOnClickListener(v -> check.toggle());
+            row.addView(checkArea, new LinearLayout.LayoutParams(dp(64), dp(64)));
+
             TextView text = label(number + ". " + item.name + (item.quantity.isEmpty() ? "" : "  " + item.quantity));
-            text.setTextSize(17);
+            text.setTextSize(18);
+            text.setTextColor(Color.rgb(40, 40, 40));
             text.setAlpha(item.done ? .48f : 1f);
             if (item.done) text.setPaintFlags(text.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
             row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
             if (search) {
-                Button searchButton = button("找圖");
-                row.addView(searchButton);
+                Button searchButton = compactButton("找圖");
+                row.addView(searchButton, new LinearLayout.LayoutParams(-2, dp(44)));
                 searchButton.setOnClickListener(v -> searchImage(item.name));
             }
+            TextView handle = new TextView(this);
+            handle.setText("☰");
+            handle.setTextSize(24);
+            handle.setTextColor(Color.rgb(110, 110, 110));
+            handle.setGravity(Gravity.CENTER);
+            handle.setContentDescription("拖曳移動商品 " + number);
+            row.addView(handle, new LinearLayout.LayoutParams(dp(52), dp(64)));
+            handle.setOnTouchListener((v, event) -> {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) listContainer.startDrag(row, event.getRawY());
+                return true;
+            });
+
+            final float[] touchY = new float[1];
+            View.OnTouchListener rememberTouch = (v, event) -> {
+                touchY[0] = event.getRawY();
+                return false;
+            };
+            View.OnLongClickListener drag = v -> {
+                listContainer.startDrag(row, touchY[0]);
+                return true;
+            };
+            text.setOnTouchListener(rememberTouch);
+            text.setOnLongClickListener(drag);
+            row.setOnTouchListener(rememberTouch);
+            row.setOnLongClickListener(drag);
+
             check.setOnCheckedChangeListener((button, checked) -> {
                 db.toggleItem(listId, item.id, checked);
                 if (activeListId() == listId) renderItems();
             });
             text.setOnClickListener(v -> editItemDialog(item, listId));
-            text.setOnLongClickListener(v -> {
-                confirmDeleteItem(item, listId);
-                return true;
-            });
             listContainer.addView(row, matchWrap());
-            number++;
         }
         if (items.isEmpty()) listContainer.addView(label("尚無品項，可輸入文字後按「加入清單」。"));
+        else listContainer.addView(label("已勾選的品項會自動排到該賣場最下面。按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；左右滑動品項可刪除（可按「復原」）；點品項可編輯或改賣場。"));
+        listContainer.setOnSwipeListener(id -> {
+            for (ShoppingDb.Item item : items) if (item.id == id) deleteWithUndo(item, listId);
+        });
+        listContainer.setOnReorderListener(ids -> {
+            db.reorderItems(listId, ids);
+            if (activeListId() == listId) renderItems();
+        });
+    }
+
+    private String groupKey(ShoppingDb.Item item) {
+        return ShoppingListModel.normalizeStore(item.store) + "｜" + item.category;
+    }
+
+    private LinearLayout groupHeader(ShoppingDb.Item first, long listId) {
+        LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setBackgroundColor(Color.rgb(200, 228, 198));
+        TextView heading = title(ShoppingListModel.normalizeStore(first.store) + "｜" + first.category, 17);
+        heading.setPadding(dp(10), dp(8), dp(10), dp(8));
+        header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+        if (ShoppingListModel.UNASSIGNED_STORE.equals(ShoppingListModel.normalizeStore(first.store))) {
+            Button assign = compactButton("＋ 指定／新增賣場");
+            header.addView(assign, new LinearLayout.LayoutParams(-2, dp(44)));
+            assign.setOnClickListener(v -> assignUnassignedItems(listId));
+        }
+        return header;
+    }
+
+    private interface StoreCallback { void onStore(String store); }
+
+    private List<String> customStores() {
+        return ShoppingListModel.decodeStores(getSharedPreferences("shopping_settings", MODE_PRIVATE).getString("custom_stores", ""));
+    }
+
+    private void saveCustomStore(String store) {
+        List<String> stores = customStores();
+        if (!stores.contains(store)) stores.add(store);
+        getSharedPreferences("shopping_settings", MODE_PRIVATE).edit()
+                .putString("custom_stores", ShoppingListModel.encodeStores(stores)).apply();
+    }
+
+    private List<String> knownStores() {
+        return ShoppingListModel.storeOptions(customStores(), db.usedStores());
+    }
+
+    private void renderStoreChoices() {
+        storeChoices.removeAllViews();
+        List<String> stores = new ArrayList<>(knownStores());
+        stores.remove(ShoppingListModel.UNASSIGNED_STORE);
+        if (chosenStore != null && !stores.contains(chosenStore)) chosenStore = null;
+        storeChoices.addView(storeChoice("自動判斷", null));
+        for (String store : stores) storeChoices.addView(storeChoice(store, store));
+        Button add = compactButton("＋ 新增賣場");
+        storeChoices.addView(add, new LinearLayout.LayoutParams(-2, dp(48)));
+        add.setOnClickListener(v -> addStoreDialog(store -> {
+            chosenStore = store;
+            renderStoreChoices();
+        }));
+    }
+
+    private RadioButton storeChoice(String label, String store) {
+        RadioButton choice = new RadioButton(this);
+        choice.setText(label);
+        choice.setTextSize(16);
+        choice.setPadding(dp(4), dp(10), dp(14), dp(10));
+        choice.setChecked(store == null ? chosenStore == null : store.equals(chosenStore));
+        choice.setOnClickListener(v -> {
+            chosenStore = store;
+            renderStoreChoices();
+        });
+        return choice;
+    }
+
+    private void chooseStore(String current, StoreCallback callback) {
+        final List<String> options = knownStores();
+        String[] labels = new String[options.size() + 1];
+        for (int i = 0; i < options.size(); i++) {
+            labels[i] = options.get(i) + (options.get(i).equals(ShoppingListModel.normalizeStore(current)) ? "（目前）" : "");
+        }
+        labels[options.size()] = "＋ 新增賣場…";
+        new AlertDialog.Builder(this).setTitle("選擇賣場")
+                .setItems(labels, (dialog, which) -> {
+                    if (which < options.size()) callback.onStore(options.get(which));
+                    else addStoreDialog(callback);
+                })
+                .setNegativeButton("取消", null).show();
+    }
+
+    private void addStoreDialog(StoreCallback callback) {
+        EditText name = input("賣場名稱，例如：家樂福、傳統市場", "");
+        LinearLayout form = column();
+        form.setPadding(dp(18), 0, dp(18), 0);
+        form.addView(name, matchWrap());
+        new AlertDialog.Builder(this).setTitle("新增賣場").setView(form)
+                .setPositiveButton("新增", (dialog, which) -> {
+                    String store = name.getText().toString().trim();
+                    if (store.isEmpty()) {
+                        toast("請輸入賣場名稱");
+                        return;
+                    }
+                    saveCustomStore(store);
+                    callback.onStore(store);
+                }).setNegativeButton("取消", null).show();
+    }
+
+    private void assignUnassignedItems(long listId) {
+        final List<ShoppingDb.Item> unassigned = new ArrayList<>();
+        for (ShoppingDb.Item item : db.items(listId)) {
+            if (ShoppingListModel.UNASSIGNED_STORE.equals(ShoppingListModel.normalizeStore(item.store))) unassigned.add(item);
+        }
+        if (unassigned.isEmpty()) return;
+        chooseStore(ShoppingListModel.UNASSIGNED_STORE, store -> {
+            if (ShoppingListModel.UNASSIGNED_STORE.equals(store)) return;
+            String[] labels = new String[unassigned.size()];
+            final boolean[] selected = new boolean[unassigned.size()];
+            for (int i = 0; i < unassigned.size(); i++) labels[i] = unassigned.get(i).name;
+            new AlertDialog.Builder(this).setTitle("哪些品項要移到「" + store + "」？")
+                    .setMultiChoiceItems(labels, selected, (dialog, which, checked) -> selected[which] = checked)
+                    .setPositiveButton("移動", (dialog, which) -> {
+                        List<Long> ids = new ArrayList<>();
+                        for (int i = 0; i < unassigned.size(); i++) if (selected[i]) ids.add(unassigned.get(i).id);
+                        if (ids.isEmpty()) {
+                            toast("已新增賣場選項，未移動品項");
+                            return;
+                        }
+                        db.moveItemsToStore(listId, ids, store);
+                        status.setText("已將 " + ids.size() + " 項移到「" + store + "」");
+                        if (activeListId() == listId) renderItems();
+                    })
+                    .setNegativeButton("取消", null).show();
+        });
     }
 
     private void renderImages() {
@@ -488,8 +696,13 @@ public final class MainActivity extends Activity {
             CheckBox done = new CheckBox(this);
             done.setChecked(image.done);
             done.setContentDescription("商品圖片 " + number + (image.done ? " 已完成" : " 完成狀態"));
-            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(52), dp(52), Gravity.TOP | Gravity.END);
-            card.addView(done, checkParams);
+            done.setScaleX(1.5f);
+            done.setScaleY(1.5f);
+            FrameLayout checkArea = new FrameLayout(this);
+            checkArea.setBackgroundColor(Color.argb(170, 255, 255, 255));
+            checkArea.addView(done, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+            checkArea.setOnClickListener(v -> done.toggle());
+            card.addView(checkArea, new FrameLayout.LayoutParams(dp(60), dp(60), Gravity.TOP | Gravity.END));
             done.setOnCheckedChangeListener((button, checked) -> {
                 db.toggleImage(listId, image.id, checked);
                 if (activeListId() == listId) renderImages();
@@ -516,17 +729,24 @@ public final class MainActivity extends Activity {
         form.setPadding(dp(18), 0, dp(18), 0);
         EditText name = input("商品名稱", item.name);
         EditText quantity = input("數量", item.quantity);
-        EditText store = input("賣場：好市多／全聯／未指定", item.store);
+        final String[] store = {ShoppingListModel.normalizeStore(item.store)};
+        Button storeButton = button("賣場：" + store[0] + "（點此更改）");
+        storeButton.setOnClickListener(v -> chooseStore(store[0], picked -> {
+            store[0] = picked;
+            storeButton.setText("賣場：" + picked + "（點此更改）");
+        }));
         form.addView(name);
         form.addView(quantity);
-        form.addView(store);
+        form.addView(storeButton, matchWrap());
         new AlertDialog.Builder(this).setTitle("編輯品項").setView(form)
                 .setPositiveButton("儲存", (dialog, which) -> {
                     if (!name.getText().toString().trim().isEmpty()) {
-                        db.updateItem(listId, item.id, name.getText().toString().trim(), quantity.getText().toString().trim(), store.getText().toString().trim());
+                        db.updateItem(listId, item.id, name.getText().toString().trim(), quantity.getText().toString().trim(), store[0]);
                         if (activeListId() == listId) renderItems();
                     }
-                }).setNegativeButton("取消", null).show();
+                })
+                .setNeutralButton("刪除", (dialog, which) -> confirmDeleteItem(item, listId))
+                .setNegativeButton("取消", null).show();
     }
 
     private void addItemDialog() {
@@ -535,10 +755,32 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("新增", (dialog, which) -> {
                     String value = name.getText().toString().trim();
                     if (!value.isEmpty()) {
-                        db.addItem(activeListId(), value);
+                        db.appendItems(activeListId(), LocalParser.withStore(
+                                Collections.singletonList(new LocalParser.ItemDraft(value, "", ShoppingListModel.UNASSIGNED_STORE, "其他", 0)), chosenStore));
                         renderItems();
                     }
                 }).setNegativeButton("取消", null).show();
+    }
+
+    private void deleteWithUndo(ShoppingDb.Item item, long listId) {
+        db.deleteItem(listId, item.id);
+        if (activeListId() == listId) renderItems();
+        showUndo("已刪除「" + item.name + "」", () -> {
+            db.restoreItem(listId, item);
+            if (activeListId() == listId) renderItems();
+        });
+    }
+
+    private void showUndo(String message, Runnable action) {
+        undoBar.removeCallbacks(hideUndo);
+        undoAction = action;
+        if (message == null) {
+            undoBar.setVisibility(View.GONE);
+            return;
+        }
+        undoText.setText(message);
+        undoBar.setVisibility(View.VISIBLE);
+        undoBar.postDelayed(hideUndo, 8000);
     }
 
     private void confirmDeleteItem(ShoppingDb.Item item, long listId) {
@@ -805,6 +1047,18 @@ public final class MainActivity extends Activity {
         Button button = new Button(this);
         button.setText(text);
         button.setMinHeight(dp(48));
+        return button;
+    }
+
+    private Button compactButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setTextSize(14);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(dp(8), 0, dp(8), 0);
         return button;
     }
 

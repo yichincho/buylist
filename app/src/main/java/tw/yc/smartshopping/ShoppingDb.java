@@ -138,10 +138,60 @@ public final class ShoppingDb extends SQLiteOpenHelper {
     }
 
     public synchronized void updateItem(long listId, long id, String name, String quantity, String store) {
-        ContentValues v = new ContentValues(); v.put("name", name); v.put("quantity", quantity); v.put("store", store);
+        String normalizedStore = ShoppingListModel.normalizeStore(store);
+        ContentValues v = new ContentValues(); v.put("name", name); v.put("quantity", quantity); v.put("store", normalizedStore);
         SQLiteDatabase db = getWritableDatabase();
-        db.update("items", v, "id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)});
-        updateListTime(db, listId);
+        db.beginTransaction();
+        try {
+            if (!normalizedStore.equals(storeOf(db, listId, id))) {
+                v.put("sort_order", ShoppingListModel.nextSortOrder(lastSortOrder(db, "items", listId), 0));
+            }
+            db.update("items", v, "id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)});
+            updateListTime(db, listId);
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+
+    /** Moves items to another store; they are placed at the end of that store's group. */
+    public synchronized void moveItemsToStore(long listId, List<Long> ids, String store) {
+        if (ids == null || ids.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            int lastOrder = lastSortOrder(db, "items", listId);
+            int offset = 0;
+            for (long id : ids) {
+                ContentValues v = new ContentValues();
+                v.put("store", ShoppingListModel.normalizeStore(store));
+                v.put("sort_order", ShoppingListModel.nextSortOrder(lastOrder, offset++));
+                db.update("items", v, "id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)});
+            }
+            updateListTime(db, listId);
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+
+    /** Stores the given display order as the items' sort order. */
+    public synchronized void reorderItems(long listId, List<Long> orderedIds) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            int order = 0;
+            for (long id : orderedIds) {
+                ContentValues v = new ContentValues(); v.put("sort_order", order++);
+                db.update("items", v, "id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)});
+            }
+            updateListTime(db, listId);
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
+    }
+
+    public synchronized List<String> usedStores() {
+        List<String> stores = new ArrayList<>();
+        try (Cursor c = getReadableDatabase().rawQuery("SELECT DISTINCT store FROM items ORDER BY store", null)) {
+            while (c.moveToNext()) stores.add(c.getString(0));
+        }
+        return stores;
     }
 
     public synchronized void toggleItem(long id, boolean done) { toggleItem(1L, id, done); }
@@ -151,6 +201,21 @@ public final class ShoppingDb extends SQLiteOpenHelper {
         SQLiteDatabase db = getWritableDatabase();
         db.delete("items", "id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)});
         updateListTime(db, listId);
+    }
+
+    /** Puts back an item removed with deleteItem, keeping its id, position and checked state. */
+    public synchronized void restoreItem(long listId, Item item) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            requireList(db, listId);
+            ContentValues v = new ContentValues();
+            v.put("id", item.id); v.put("name", item.name); v.put("quantity", item.quantity); v.put("store", item.store);
+            v.put("category", item.category); v.put("sort_order", item.order); v.put("done", item.done ? 1 : 0); v.put("list_id", listId);
+            db.insertWithOnConflict("items", null, v, SQLiteDatabase.CONFLICT_IGNORE);
+            updateListTime(db, listId);
+            db.setTransactionSuccessful();
+        } finally { db.endTransaction(); }
     }
 
     public synchronized List<ImageRow> images() { return images(1L); }
@@ -255,7 +320,13 @@ public final class ShoppingDb extends SQLiteOpenHelper {
         }
     }
 
-    private void requireList(SQLiteDatabase db, long listId) {
+    private String storeOf(SQLiteDatabase db, long listId, long id) {
+        try (Cursor c = db.rawQuery("SELECT store FROM items WHERE id=? AND list_id=?", new String[]{String.valueOf(id), String.valueOf(listId)})) {
+            return c.moveToFirst() ? c.getString(0) : null;
+        }
+    }
+
+        private void requireList(SQLiteDatabase db, long listId) {
         try (Cursor c = db.rawQuery("SELECT 1 FROM shopping_lists WHERE id=?", new String[]{String.valueOf(listId)})) {
             if (!c.moveToFirst()) throw new IllegalArgumentException("Shopping list does not exist: " + listId);
         }

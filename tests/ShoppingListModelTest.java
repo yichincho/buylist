@@ -1,6 +1,7 @@
 package tw.yc.smartshopping;
 
-import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.List;
 import java.util.TimeZone;
 
 public final class ShoppingListModelTest {
@@ -11,6 +12,8 @@ public final class ShoppingListModelTest {
             assertEquals("採買清單 1970-01-01 00:00:00", ShoppingListModel.nameAt(0));
             testAppendOrderFollowsLastSurvivingRow();
             testDraftClearsOnlyAfterSuccessfulAppend();
+            testGroupedOrderKeepsFirstAppearance();
+            testStoreOptions();
             System.out.println("ShoppingListModelTest PASS");
         } finally {
             TimeZone.setDefault(previous);
@@ -27,6 +30,21 @@ public final class ShoppingListModelTest {
         assertFalse(ShoppingListModel.shouldClearDraftAfterAppend(false, "牛奶", "牛奶"));
         assertTrue(ShoppingListModel.shouldClearDraftAfterAppend(true, "牛奶", "牛奶"));
         assertFalse(ShoppingListModel.shouldClearDraftAfterAppend(true, "牛奶", "牛奶 雞蛋"));
+    }
+
+    private static void testGroupedOrderKeepsFirstAppearance() {
+        List<String> keys = Arrays.asList("全聯", "好市多", "全聯", "未指定", "好市多");
+        assertEquals(Arrays.asList(0, 2, 1, 4, 3), ShoppingListModel.groupedOrder(keys));
+        List<Boolean> done = Arrays.asList(true, false, false, false, true);
+        assertEquals(Arrays.asList(2, 0, 1, 4, 3), ShoppingListModel.groupedOrder(keys, done));
+    }
+
+    private static void testStoreOptions() {
+        assertEquals(Arrays.asList("好市多", "全聯", "菜市場", "家樂福", "屈臣氏", "未指定"),
+                ShoppingListModel.storeOptions(Arrays.asList("家樂福", " "), Arrays.asList("全聯", "屈臣氏", "未指定")));
+        assertEquals("家樂福\n傳統市場", ShoppingListModel.encodeStores(Arrays.asList(" 家樂福 ", "", "傳統市場")));
+        assertEquals(Arrays.asList("家樂福", "傳統市場"), ShoppingListModel.decodeStores("家樂福\n\n傳統市場\n家樂福"));
+        assertEquals("未指定", ShoppingListModel.normalizeStore("  "));
     }
 
     private static void assertEquals(Object expected, Object actual) {
