@@ -19,6 +19,10 @@ import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.text.Editable;
 import android.text.TextUtils;
+import android.graphics.Typeface;
+import android.text.style.StyleSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.SpannableStringBuilder;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -62,7 +66,7 @@ public final class MainActivity extends Activity {
     private TextView hint;
     private Ui ui;
     private LinearLayout storeChoices;
-    private String chosenStore;
+    private String chosenStore = ShoppingListModel.DEFAULT_STORE;
     private GridLayout imageGrid;
     private TextView status;
     private LinearLayout undoBar;
@@ -606,14 +610,22 @@ public final class MainActivity extends Activity {
         checkArea.setOnClickListener(v -> check.toggle());
         content.addView(checkArea, new LinearLayout.LayoutParams(dp(60), dp(60)));
 
-        LinearLayout texts = column();
-        texts.setPadding(0, dp(10), dp(4), dp(10));
-        TextView name = ui.text(item.name, 17, item.done ? R.color.text_disabled : R.color.text_primary, !item.done);
-        if (item.done) name.setPaintFlags(name.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
-        texts.addView(name);
+        LinearLayout texts = row();
+        texts.setGravity(Gravity.CENTER_VERTICAL);
+        texts.setMinimumHeight(dp(60));
+        texts.setPadding(0, dp(8), dp(4), dp(8));
+        // Quantity sits right after the name, highlighted, e.g. "牛奶  2 瓶".
+        SpannableStringBuilder label = new SpannableStringBuilder(item.name);
         if (!item.quantity.isEmpty()) {
-            texts.addView(ui.text(item.quantity, 14, item.done ? R.color.text_disabled : R.color.text_secondary, false));
+            int start = label.length() + 2;
+            label.append("  ").append(item.quantity);
+            if (!item.done) label.setSpan(new ForegroundColorSpan(ui.color(R.color.accent)), start, label.length(), 0);
+            label.setSpan(new StyleSpan(Typeface.BOLD), start, label.length(), 0);
         }
+        TextView name = ui.text("", 17, item.done ? R.color.text_disabled : R.color.text_primary, !item.done);
+        name.setText(label);
+        if (item.done) name.setPaintFlags(name.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
+        texts.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
         content.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
         if (search) {
             Button searchButton = ui.textButton("找圖", R.color.accent);
@@ -696,8 +708,7 @@ public final class MainActivity extends Activity {
         storeChoices.removeAllViews();
         List<String> stores = new ArrayList<>(knownStores());
         stores.remove(ShoppingListModel.UNASSIGNED_STORE);
-        if (chosenStore != null && !stores.contains(chosenStore)) chosenStore = null;
-        storeChoices.addView(storeChoice("自動判斷", null), ui.margins(-2, -2, 0, 0, 8, 0));
+        if (!stores.contains(chosenStore)) chosenStore = ShoppingListModel.DEFAULT_STORE;
         for (String store : stores) storeChoices.addView(storeChoice(store, store), ui.margins(-2, -2, 0, 0, 8, 0));
         TextView add = ui.chip("＋ 新增", false);
         add.setTextColor(ui.color(R.color.accent));
@@ -709,7 +720,7 @@ public final class MainActivity extends Activity {
     }
 
     private TextView storeChoice(String label, String store) {
-        boolean selected = store == null ? chosenStore == null : store.equals(chosenStore);
+        boolean selected = store.equals(chosenStore);
         TextView choice = ui.chip(selected ? "✓ " + label : label, selected);
         choice.setContentDescription(label + (selected ? "，已選取" : ""));
         choice.setOnClickListener(v -> {

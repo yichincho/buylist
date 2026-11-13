@@ -39,6 +39,20 @@ jobs:
       - name: Build and test
         run: ANDROID_SDK_ROOT="$ANDROID_HOME" bash scripts/build-apk.sh
 
+      - name: Show signing certificate
+        id: signing
+        env:
+          DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+        run: |
+          cert=$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs build/outputs/apk/debug/app-debug.apk | grep -m1 "SHA-256" | sed 's/.*: //')
+          echo "Signing certificate SHA-256: $cert"
+          if [ -n "$DEBUG_KEYSTORE_BASE64" ]; then
+            echo "note=固定簽章（SHA-256 ${cert:0:16}…），可直接覆蓋安裝。" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::DEBUG_KEYSTORE_BASE64 secret is not set; this APK uses a one-off key and cannot update earlier installs."
+            echo "note=⚠️ 未設定固定簽章，這版需要先解除安裝舊版。" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: app-debug-apk
@@ -55,4 +69,4 @@ jobs:
           gh release create latest-apk build/outputs/apk/debug/app-debug.apk \
             --target "$GITHUB_SHA" \
             --title "最新 APK" \
-            --notes "自動打包：${GITHUB_REF_NAME} ${GITHUB_SHA::7}。直接下載 app-debug.apk 安裝。"
+            --notes "自動打包：${GITHUB_REF_NAME} ${GITHUB_SHA::7}。${{ steps.signing.outputs.note }}"

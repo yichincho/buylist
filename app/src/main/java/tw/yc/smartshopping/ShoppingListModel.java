@@ -13,7 +13,8 @@ import java.util.Set;
 
 public final class ShoppingListModel {
     public static final String UNASSIGNED_STORE = "未指定";
-    public static final String[] PRESET_STORES = {"好市多", "全聯", "菜市場"};
+    public static final String DEFAULT_STORE = "菜市場";
+    public static final String[] PRESET_STORES = {"菜市場", "全聯", "好市多"};
 
     private ShoppingListModel() {}
 

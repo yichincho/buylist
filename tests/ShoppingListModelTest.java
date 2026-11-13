@@ -40,7 +40,7 @@ public final class ShoppingListModelTest {
     }
 
     private static void testStoreOptions() {
-        assertEquals(Arrays.asList("好市多", "全聯", "菜市場", "家樂福", "屈臣氏", "未指定"),
+        assertEquals(Arrays.asList("菜市場", "全聯", "好市多", "家樂福", "屈臣氏", "未指定"),
                 ShoppingListModel.storeOptions(Arrays.asList("家樂福", " "), Arrays.asList("全聯", "屈臣氏", "未指定")));
         assertEquals("家樂福\n傳統市場", ShoppingListModel.encodeStores(Arrays.asList(" 家樂福 ", "", "傳統市場")));
         assertEquals(Arrays.asList("家樂福", "傳統市場"), ShoppingListModel.decodeStores("家樂福\n\n傳統市場\n家樂福"));
