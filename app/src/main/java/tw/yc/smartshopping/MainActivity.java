@@ -9,6 +9,7 @@ import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -17,6 +18,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.speech.RecognizerIntent;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -29,7 +31,7 @@ import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -53,7 +55,12 @@ public final class MainActivity extends Activity {
     private static final String PREF_LEGACY_DRAFT_MIGRATED = "legacy_draft_migrated";
 
     private EditText draft;
-    private DragListLayout listContainer;
+    private LinearLayout listContainer;
+    private final List<DragListLayout> groupLists = new ArrayList<>();
+    private TextView listSummary;
+    private ProgressBar listProgress;
+    private TextView hint;
+    private Ui ui;
     private LinearLayout storeChoices;
     private String chosenStore;
     private GridLayout imageGrid;
@@ -73,6 +80,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         db = new ShoppingDb(this);
+        ui = new Ui(this);
         keyStore = new SecureKeyStore(this);
         preferences = getPreferences(MODE_PRIVATE);
         initializeLists();
@@ -120,36 +128,46 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        FrameLayout frame = new FrameLayout(this);
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
         LinearLayout root = column();
-        root.setPadding(dp(16), dp(12), dp(16), dp(40));
+        root.setPadding(dp(16), dp(12), dp(16), dp(96));
         scroll.addView(root);
+        frame.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
 
+        // App bar: title, current list and the two navigation actions.
         LinearLayout header = row();
+        header.setGravity(Gravity.CENTER_VERTICAL);
         LinearLayout heading = column();
-        heading.addView(title(getString(R.string.app_name), 27));
-        currentListLabel = label("");
+        heading.addView(ui.text(getString(R.string.app_name), 26, R.color.text_primary, true));
+        currentListLabel = ui.text("", 14, R.color.text_secondary, false);
         currentListLabel.setId(R.id.currentListTitle);
-        currentListLabel.setTextColor(Color.rgb(60, 95, 62));
+        currentListLabel.setSingleLine(true);
+        currentListLabel.setEllipsize(TextUtils.TruncateAt.END);
         heading.addView(currentListLabel);
         header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        Button history = button(getString(R.string.list_history));
+        Button history = ui.tonalButton(getString(R.string.list_history));
         history.setId(R.id.listHistoryButton);
-        Button settings = button("設定 ⚙");
-        header.addView(history);
-        header.addView(settings);
-        root.addView(header);
+        Button settings = ui.tonalButton("設定");
+        header.addView(history, ui.margins(-2, dp(44), 6, 0, 0, 0));
+        header.addView(settings, ui.margins(-2, dp(44), 6, 0, 0, 0));
+        root.addView(header, ui.margins(-1, -2, 4, 6, 0, 18));
         history.setOnClickListener(v -> showHistory());
         settings.setOnClickListener(v -> startActivity(new Intent(this, SettingsActivity.class)));
 
+        // Input card.
+        LinearLayout input = ui.card();
+        input.setPadding(dp(14), dp(14), dp(14), dp(12));
         draft = new EditText(this);
         draft.setId(R.id.inputDraft);
         draft.setHint("貼上或輸入要買的東西…\n例如：好市多牛奶、全聯雞蛋、衛生紙 2 包");
-        draft.setMinLines(4);
+        draft.setMinLines(3);
         draft.setGravity(Gravity.TOP);
+        ui.styleField(draft);
         draft.setText(preferences.getString(draftKey(activeListId()), ""));
-        root.addView(draft, matchWrap());
+        input.addView(draft, matchWrap());
         draft.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
@@ -158,52 +176,116 @@ public final class MainActivity extends Activity {
             @Override public void afterTextChanged(Editable editable) {}
         });
 
-        TextView storeLabel = label("這次加入的品項要放到哪個賣場？（自動判斷：依文字中的賣場名稱）");
-        root.addView(storeLabel, matchWrap());
-        HorizontalScrollView storeScroll = new HorizontalScrollView(this);
-        storeScroll.setHorizontalScrollBarEnabled(false);
-        storeChoices = row();
-        storeScroll.addView(storeChoices);
-        root.addView(storeScroll, matchWrap());
-
-        LinearLayout inputActions = row();
-        Button paste = button("貼上文字");
-        Button voice = button("🎤 語音輸入");
-        inputActions.addView(paste, new LinearLayout.LayoutParams(0, -2, 1));
-        inputActions.addView(voice, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(inputActions);
+        LinearLayout inputTools = row();
+        Button paste = ui.textButton("貼上", R.color.accent);
+        Button voice = ui.textButton("🎤 語音", R.color.accent);
+        Button clearText = ui.textButton(getString(R.string.clear_text), R.color.text_secondary);
+        clearText.setId(R.id.clearDraftButton);
+        inputTools.addView(paste, new LinearLayout.LayoutParams(-2, dp(44)));
+        inputTools.addView(voice, new LinearLayout.LayoutParams(-2, dp(44)));
+        inputTools.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        inputTools.addView(clearText, new LinearLayout.LayoutParams(-2, dp(44)));
+        input.addView(inputTools, ui.margins(-1, -2, 0, 4, 0, 4));
         paste.setOnClickListener(v -> pasteText());
         voice.setOnClickListener(v -> requestVoice());
-
-        LinearLayout draftActions = row();
-        Button addDraft = button(getString(R.string.add_text_to_list));
-        addDraft.setId(R.id.addDraftButton);
-        Button clearText = button(getString(R.string.clear_text));
-        clearText.setId(R.id.clearDraftButton);
-        draftActions.addView(addDraft, new LinearLayout.LayoutParams(0, -2, 1));
-        draftActions.addView(clearText, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(draftActions);
-        addDraft.setOnClickListener(v -> addDraftToList());
         clearText.setOnClickListener(v -> clearDraftText());
 
-        Button organize = button(getString(R.string.ai_organize_add));
-        organize.setId(R.id.organizeButton);
-        organize.setTextSize(18);
-        root.addView(organize, matchWrap());
-        organize.setOnClickListener(v -> organize(organize));
-        status = label("");
-        root.addView(status, matchWrap());
+        input.addView(ui.text("放到哪個賣場", 13, R.color.text_secondary, true), ui.margins(-2, -2, 2, 0, 0, 8));
+        HorizontalScrollView storeScroll = new HorizontalScrollView(this);
+        storeScroll.setHorizontalScrollBarEnabled(false);
+        storeScroll.setClipToPadding(false);
+        storeChoices = row();
+        storeScroll.addView(storeChoices);
+        input.addView(storeScroll, matchWrap());
 
-        root.addView(title("購物項目", 22));
-        listContainer = new DragListLayout(this);
+        LinearLayout draftActions = row();
+        Button addDraft = ui.primaryButton(getString(R.string.add_text_to_list));
+        addDraft.setId(R.id.addDraftButton);
+        Button organize = ui.tonalButton("✨ " + getString(R.string.ai_organize_add));
+        organize.setId(R.id.organizeButton);
+        draftActions.addView(addDraft, new LinearLayout.LayoutParams(0, dp(48), 1));
+        draftActions.addView(organize, weighted(8));
+        input.addView(draftActions, ui.margins(-1, -2, 0, 14, 0, 0));
+        addDraft.setOnClickListener(v -> addDraftToList());
+        organize.setOnClickListener(v -> organize(organize));
+        status = ui.text("", 14, R.color.text_secondary, false);
+        status.setPadding(dp(2), dp(8), dp(2), 0);
+        input.addView(status, matchWrap());
+        root.addView(input, matchWrap());
+
+        // Shopping list: summary, progress and one card per store.
+        LinearLayout listHeader = row();
+        listHeader.setGravity(Gravity.BOTTOM);
+        listHeader.addView(ui.text("購物項目", 20, R.color.text_primary, true), new LinearLayout.LayoutParams(0, -2, 1));
+        listSummary = ui.text("", 14, R.color.text_secondary, false);
+        listHeader.addView(listSummary);
+        root.addView(listHeader, ui.margins(-1, -2, 4, 24, 4, 8));
+        listProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        listProgress.setProgressTintList(ColorStateList.valueOf(ui.color(R.color.accent)));
+        listProgress.setProgressBackgroundTintList(ColorStateList.valueOf(ui.color(R.color.border_subtle)));
+        root.addView(listProgress, ui.margins(-1, dp(6), 4, 0, 4, 12));
+
+        listContainer = column();
         listContainer.setId(R.id.shoppingListContainer);
+        root.addView(listContainer, matchWrap());
+
+        LinearLayout itemActions = row();
+        Button addItem = ui.tonalButton("＋ 新增品項");
+        Button clearCompleted = ui.outlineButton("清除已買", R.color.text_primary);
+        itemActions.addView(addItem, new LinearLayout.LayoutParams(0, dp(48), 1));
+        itemActions.addView(clearCompleted, weighted(8));
+        root.addView(itemActions, ui.margins(-1, -2, 0, 2, 0, 0));
+        addItem.setOnClickListener(v -> addItemDialog());
+        clearCompleted.setOnClickListener(v -> confirmClearCompleted());
+        hint = ui.text("點品項可編輯　長按或按住 ⠿ 拖曳排序　左右滑動刪除", 13, R.color.text_secondary, false);
+        hint.setGravity(Gravity.CENTER);
+        root.addView(hint, ui.margins(-1, -2, 0, 10, 0, 0));
+
+        // Reference images.
+        LinearLayout images = ui.card();
+        images.setPadding(dp(14), dp(14), dp(14), dp(14));
+        images.addView(ui.text("商品圖片", 18, R.color.text_primary, true));
+        images.addView(ui.text("不必對應品項。可從 LINE 分享、相簿選擇或貼上剪貼簿圖片。", 13, R.color.text_secondary, false),
+                ui.margins(-1, -2, 0, 2, 0, 10));
+        imageGrid = new GridLayout(this);
+        imageGrid.setId(R.id.imageGrid);
+        imageGrid.setColumnCount(2);
+        images.addView(imageGrid, matchWrap());
+        LinearLayout imageActions = row();
+        Button gallery = ui.tonalButton("＋ 相簿圖片");
+        Button clipImage = ui.outlineButton("貼上圖片", R.color.text_primary);
+        imageActions.addView(gallery, new LinearLayout.LayoutParams(0, dp(48), 1));
+        imageActions.addView(clipImage, weighted(8));
+        images.addView(imageActions, ui.margins(-1, -2, 0, 10, 0, 0));
+        root.addView(images, ui.margins(-1, -2, 0, 24, 0, 0));
+        gallery.setOnClickListener(v -> pickImages());
+        clipImage.setOnClickListener(v -> pasteImage());
+
+        // Whole-list actions.
+        LinearLayout listActions = ui.card();
+        listActions.setPadding(dp(14), dp(14), dp(14), dp(10));
+        listActions.addView(ui.text("清單", 18, R.color.text_primary, true), ui.margins(-2, -2, 0, 0, 0, 8));
+        Button saveAndNew = ui.tonalButton(getString(R.string.save_and_new_list));
+        saveAndNew.setId(R.id.saveAndNewListButton);
+        Button clearList = ui.textButton(getString(R.string.clear_whole_list), R.color.negative);
+        clearList.setId(R.id.clearWholeListButton);
+        listActions.addView(saveAndNew, new LinearLayout.LayoutParams(-1, dp(48)));
+        listActions.addView(clearList, ui.margins(-1, dp(48), 0, 4, 0, 0));
+        root.addView(listActions, ui.margins(-1, -2, 0, 16, 0, 0));
+        saveAndNew.setOnClickListener(v -> saveAndStartNewList());
+        clearList.setOnClickListener(v -> confirmClearCurrentList());
+
+        // Floating undo snackbar.
         undoBar = row();
         undoBar.setGravity(Gravity.CENTER_VERTICAL);
-        undoBar.setBackgroundColor(Color.rgb(60, 60, 60));
-        undoText = label("");
-        undoText.setTextColor(Color.WHITE);
+        undoBar.setPadding(dp(18), dp(4), dp(6), dp(4));
+        undoBar.setBackground(ui.shape(ui.color(R.color.inverse_bg), Ui.RADIUS_ELEMENT, 0));
+        undoBar.setElevation(dp(6));
+        undoText = ui.text("", 15, R.color.inverse_text, false);
+        undoText.setSingleLine(true);
+        undoText.setEllipsize(TextUtils.TruncateAt.END);
         undoBar.addView(undoText, new LinearLayout.LayoutParams(0, -2, 1));
-        Button undo = compactButton("復原");
+        Button undo = ui.textButton("復原", R.color.inverse_accent);
         undoBar.addView(undo, new LinearLayout.LayoutParams(-2, dp(44)));
         undo.setOnClickListener(v -> {
             Runnable action = undoAction;
@@ -211,47 +293,12 @@ public final class MainActivity extends Activity {
             if (action != null) action.run();
         });
         undoBar.setVisibility(View.GONE);
-        root.addView(undoBar, matchWrap());
-        root.addView(listContainer, matchWrap());
-
-        root.addView(title("商品圖片（不必對應品項）", 22));
-        root.addView(label("可從 LINE 分享、相簿選擇或嘗試貼上剪貼簿圖片。"));
-        imageGrid = new GridLayout(this);
-        imageGrid.setId(R.id.imageGrid);
-        imageGrid.setColumnCount(2);
-        root.addView(imageGrid, matchWrap());
-
-        LinearLayout imageActions = row();
-        Button gallery = button("＋ 相簿圖片");
-        Button clipImage = button("貼上圖片");
-        imageActions.addView(gallery, new LinearLayout.LayoutParams(0, -2, 1));
-        imageActions.addView(clipImage, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(imageActions);
-        gallery.setOnClickListener(v -> pickImages());
-        clipImage.setOnClickListener(v -> pasteImage());
-
-        LinearLayout itemActions = row();
-        Button addItem = button("＋ 新增品項");
-        Button clearCompleted = button("清除已完成");
-        itemActions.addView(addItem, new LinearLayout.LayoutParams(0, -2, 1));
-        itemActions.addView(clearCompleted, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(itemActions);
-        addItem.setOnClickListener(v -> addItemDialog());
-        clearCompleted.setOnClickListener(v -> confirmClearCompleted());
-
-        LinearLayout listActions = row();
-        Button saveAndNew = button(getString(R.string.save_and_new_list));
-        saveAndNew.setId(R.id.saveAndNewListButton);
-        Button clearList = button(getString(R.string.clear_whole_list));
-        clearList.setId(R.id.clearWholeListButton);
-        listActions.addView(saveAndNew, new LinearLayout.LayoutParams(0, -2, 1));
-        listActions.addView(clearList, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(listActions);
-        saveAndNew.setOnClickListener(v -> saveAndStartNewList());
-        clearList.setOnClickListener(v -> confirmClearCurrentList());
+        FrameLayout.LayoutParams undoParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        undoParams.setMargins(dp(16), 0, dp(16), dp(20));
+        frame.addView(undoBar, undoParams);
 
         updateCurrentListLabel();
-        setContentView(scroll);
+        setContentView(frame);
     }
 
     private void addDraftToList() {
@@ -458,6 +505,7 @@ public final class MainActivity extends Activity {
 
     private void renderItems() {
         listContainer.removeAllViews();
+        groupLists.clear();
         final long listId = activeListId();
         List<ShoppingDb.Item> stored = db.items(listId);
         List<String> storedKeys = new ArrayList<>();
@@ -468,104 +516,160 @@ public final class MainActivity extends Activity {
         }
         final List<ShoppingDb.Item> items = new ArrayList<>();
         for (int index : ShoppingListModel.groupedOrder(storedKeys, storedDone)) items.add(stored.get(index));
-        final List<String> keys = new ArrayList<>();
-        for (ShoppingDb.Item item : items) keys.add(groupKey(item));
 
-        String group = "";
-        boolean search = getSharedPreferences("shopping_settings", MODE_PRIVATE).getBoolean("image_search_enabled", false);
-        for (int position = 0; position < items.size(); position++) {
-            final ShoppingDb.Item item = items.get(position);
-            final int number = position + 1;
-            if (!keys.get(position).equals(group)) {
-                listContainer.addView(groupHeader(item, listId), matchWrap());
-                group = keys.get(position);
-            }
-            LinearLayout row = row();
-            row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setBackgroundColor(position % 2 == 0 ? Color.rgb(255, 248, 231) : Color.rgb(230, 242, 250));
-            row.setPadding(0, dp(2), 0, dp(2));
-            // Checked items stay below unchecked ones, so each can only be dragged among its own kind.
-            row.setTag(new DragListLayout.Row(item.id, keys.get(position) + (item.done ? "｜done" : "")));
+        int doneCount = 0;
+        for (ShoppingDb.Item item : items) if (item.done) doneCount++;
+        listSummary.setText(items.isEmpty() ? "" : "已買 " + doneCount + " / " + items.size());
+        listProgress.setMax(Math.max(1, items.size()));
+        listProgress.setProgress(doneCount);
+        listProgress.setVisibility(items.isEmpty() ? View.GONE : View.VISIBLE);
+        hint.setVisibility(items.isEmpty() ? View.GONE : View.VISIBLE);
 
-            FrameLayout checkArea = new FrameLayout(this);
-            CheckBox check = new CheckBox(this);
-            check.setChecked(item.done);
-            check.setScaleX(1.6f);
-            check.setScaleY(1.6f);
-            check.setContentDescription("商品 " + number + " 完成狀態");
-            checkArea.addView(check, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
-            checkArea.setOnClickListener(v -> check.toggle());
-            row.addView(checkArea, new LinearLayout.LayoutParams(dp(64), dp(64)));
-
-            TextView text = label(number + ". " + item.name + (item.quantity.isEmpty() ? "" : "  " + item.quantity));
-            text.setTextSize(18);
-            text.setTextColor(Color.rgb(40, 40, 40));
-            text.setAlpha(item.done ? .48f : 1f);
-            if (item.done) text.setPaintFlags(text.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
-            row.addView(text, new LinearLayout.LayoutParams(0, -2, 1));
-            if (search) {
-                Button searchButton = compactButton("找圖");
-                row.addView(searchButton, new LinearLayout.LayoutParams(-2, dp(44)));
-                searchButton.setOnClickListener(v -> searchImage(item.name));
-            }
-            TextView handle = new TextView(this);
-            handle.setText("☰");
-            handle.setTextSize(24);
-            handle.setTextColor(Color.rgb(110, 110, 110));
-            handle.setGravity(Gravity.CENTER);
-            handle.setContentDescription("拖曳移動商品 " + number);
-            row.addView(handle, new LinearLayout.LayoutParams(dp(52), dp(64)));
-            handle.setOnTouchListener((v, event) -> {
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) listContainer.startDrag(row, event.getRawY());
-                return true;
-            });
-
-            final float[] touchY = new float[1];
-            View.OnTouchListener rememberTouch = (v, event) -> {
-                touchY[0] = event.getRawY();
-                return false;
-            };
-            View.OnLongClickListener drag = v -> {
-                listContainer.startDrag(row, touchY[0]);
-                return true;
-            };
-            text.setOnTouchListener(rememberTouch);
-            text.setOnLongClickListener(drag);
-            row.setOnTouchListener(rememberTouch);
-            row.setOnLongClickListener(drag);
-
-            check.setOnCheckedChangeListener((button, checked) -> {
-                db.toggleItem(listId, item.id, checked);
-                if (activeListId() == listId) renderItems();
-            });
-            text.setOnClickListener(v -> editItemDialog(item, listId));
-            listContainer.addView(row, matchWrap());
+        if (items.isEmpty()) {
+            LinearLayout empty = ui.card();
+            empty.setPadding(dp(18), dp(28), dp(18), dp(28));
+            empty.setGravity(Gravity.CENTER_HORIZONTAL);
+            empty.addView(ui.text("🛒", 34, R.color.text_primary, false));
+            empty.addView(ui.text("清單是空的", 17, R.color.text_primary, true), ui.margins(-2, -2, 0, 6, 0, 2));
+            TextView tip = ui.text("在上方輸入要買的東西，按「加入清單」。", 14, R.color.text_secondary, false);
+            tip.setGravity(Gravity.CENTER);
+            empty.addView(tip);
+            listContainer.addView(empty, ui.margins(-1, -2, 0, 0, 0, 12));
+            return;
         }
-        if (items.isEmpty()) listContainer.addView(label("尚無品項，可輸入文字後按「加入清單」。"));
-        else listContainer.addView(label("已勾選的品項會自動排到該賣場最下面。按住 ☰（或長按品項）上下拖曳即可在同一賣場內移動；左右滑動品項可刪除（可按「復原」）；點品項可編輯或改賣場。"));
-        listContainer.setOnSwipeListener(id -> {
+
+        boolean search = getSharedPreferences("shopping_settings", MODE_PRIVATE).getBoolean("image_search_enabled", false);
+        DragListLayout.OnSwipeListener onSwipe = id -> {
             for (ShoppingDb.Item item : items) if (item.id == id) deleteWithUndo(item, listId);
+        };
+        DragListLayout.OnReorderListener onReorder = ids -> {
+            List<Long> all = new ArrayList<>();
+            for (DragListLayout group : groupLists) all.addAll(group.rowIds());
+            db.reorderItems(listId, all);
+            if (activeListId() == listId) renderItems();
+        };
+
+        int start = 0;
+        while (start < items.size()) {
+            String key = groupKey(items.get(start));
+            int end = start;
+            int groupDone = 0;
+            while (end < items.size() && groupKey(items.get(end)).equals(key)) {
+                if (items.get(end).done) groupDone++;
+                end++;
+            }
+            LinearLayout card = ui.card();
+            card.addView(groupHeader(items.get(start), listId, groupDone, end - start));
+            DragListLayout rows = new DragListLayout(this);
+            rows.setOnSwipeListener(onSwipe);
+            rows.setOnReorderListener(onReorder);
+            for (int position = start; position < end; position++) {
+                rows.addView(itemRow(items.get(position), listId, rows, (position - start) % 2 == 1, search), matchWrap());
+            }
+            groupLists.add(rows);
+            card.addView(rows, matchWrap());
+            listContainer.addView(card, ui.margins(-1, -2, 0, 0, 0, 12));
+            start = end;
+        }
+    }
+
+    private View itemRow(ShoppingDb.Item item, long listId, DragListLayout rows, boolean alternate, boolean search) {
+        FrameLayout row = new FrameLayout(this);
+
+        // Revealed while swiping: a red strip with a delete label on each side.
+        FrameLayout backdrop = new FrameLayout(this);
+        backdrop.setBackgroundColor(ui.color(R.color.negative));
+        backdrop.setVisibility(View.INVISIBLE);
+        for (int gravity : new int[]{Gravity.START, Gravity.END}) {
+            TextView label = ui.text("🗑 刪除", 15, R.color.on_negative, true);
+            label.setPadding(dp(22), 0, dp(22), 0);
+            backdrop.addView(label, new FrameLayout.LayoutParams(-2, -2, gravity | Gravity.CENTER_VERTICAL));
+        }
+        row.addView(backdrop, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout content = row();
+        content.setGravity(Gravity.CENTER_VERTICAL);
+        content.setMinimumHeight(dp(60));
+        content.setBackgroundColor(ui.color(alternate ? R.color.card_alt : R.color.card));
+        row.addView(content, new FrameLayout.LayoutParams(-1, -2));
+        // Checked items stay below unchecked ones, so each can only be dragged among its own kind.
+        row.setTag(new DragListLayout.Row(item.id, groupKey(item) + (item.done ? "｜done" : ""), content, backdrop));
+
+        FrameLayout checkArea = new FrameLayout(this);
+        CheckBox check = new CheckBox(this);
+        check.setChecked(item.done);
+        check.setScaleX(1.45f);
+        check.setScaleY(1.45f);
+        ui.tint(check);
+        check.setContentDescription(item.name + " 已買");
+        checkArea.addView(check, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        checkArea.setOnClickListener(v -> check.toggle());
+        content.addView(checkArea, new LinearLayout.LayoutParams(dp(60), dp(60)));
+
+        LinearLayout texts = column();
+        texts.setPadding(0, dp(10), dp(4), dp(10));
+        TextView name = ui.text(item.name, 17, item.done ? R.color.text_disabled : R.color.text_primary, !item.done);
+        if (item.done) name.setPaintFlags(name.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
+        texts.addView(name);
+        if (!item.quantity.isEmpty()) {
+            texts.addView(ui.text(item.quantity, 14, item.done ? R.color.text_disabled : R.color.text_secondary, false));
+        }
+        content.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+        if (search) {
+            Button searchButton = ui.textButton("找圖", R.color.accent);
+            content.addView(searchButton, new LinearLayout.LayoutParams(-2, dp(44)));
+            searchButton.setOnClickListener(v -> searchImage(item.name));
+        }
+        TextView handle = ui.text("⠿", 22, R.color.text_disabled, false);
+        handle.setGravity(Gravity.CENTER);
+        handle.setContentDescription("拖曳移動 " + item.name);
+        content.addView(handle, new LinearLayout.LayoutParams(dp(48), dp(60)));
+        handle.setOnTouchListener((v, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_DOWN) rows.startDrag(row, event.getRawY());
+            return true;
         });
-        listContainer.setOnReorderListener(ids -> {
-            db.reorderItems(listId, ids);
+
+        final float[] touchY = new float[1];
+        View.OnTouchListener rememberTouch = (v, event) -> {
+            touchY[0] = event.getRawY();
+            return false;
+        };
+        View.OnLongClickListener drag = v -> {
+            rows.startDrag(row, touchY[0]);
+            return true;
+        };
+        texts.setOnTouchListener(rememberTouch);
+        texts.setOnLongClickListener(drag);
+        texts.setBackground(ui.rowRipple());
+        texts.setOnClickListener(v -> editItemDialog(item, listId));
+
+        check.setOnCheckedChangeListener((button, checked) -> {
+            db.toggleItem(listId, item.id, checked);
             if (activeListId() == listId) renderItems();
         });
+        return row;
     }
 
     private String groupKey(ShoppingDb.Item item) {
         return ShoppingListModel.normalizeStore(item.store) + "｜" + item.category;
     }
 
-    private LinearLayout groupHeader(ShoppingDb.Item first, long listId) {
+    private View groupHeader(ShoppingDb.Item first, long listId, int done, int total) {
         LinearLayout header = row();
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setBackgroundColor(Color.rgb(200, 228, 198));
-        TextView heading = title(ShoppingListModel.normalizeStore(first.store) + "｜" + first.category, 17);
-        heading.setPadding(dp(10), dp(8), dp(10), dp(8));
-        header.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
-        if (ShoppingListModel.UNASSIGNED_STORE.equals(ShoppingListModel.normalizeStore(first.store))) {
-            Button assign = compactButton("＋ 指定／新增賣場");
-            header.addView(assign, new LinearLayout.LayoutParams(-2, dp(44)));
+        header.setMinimumHeight(dp(52));
+        header.setPadding(dp(16), dp(6), dp(8), dp(6));
+        header.setBackgroundColor(ui.color(R.color.accent_header));
+        String store = ShoppingListModel.normalizeStore(first.store);
+        header.addView(ui.text(store, 17, R.color.text_primary, true));
+        if (!"其他".equals(first.category)) {
+            header.addView(ui.text("・" + first.category, 15, R.color.text_secondary, false));
+        }
+        header.addView(ui.badge(done + "/" + total), ui.margins(-2, -2, 8, 0, 0, 0));
+        header.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1));
+        if (ShoppingListModel.UNASSIGNED_STORE.equals(store)) {
+            Button assign = ui.textButton("指定賣場", R.color.accent);
+            header.addView(assign, new LinearLayout.LayoutParams(-2, dp(40)));
             assign.setOnClickListener(v -> assignUnassignedItems(listId));
         }
         return header;
@@ -593,22 +697,21 @@ public final class MainActivity extends Activity {
         List<String> stores = new ArrayList<>(knownStores());
         stores.remove(ShoppingListModel.UNASSIGNED_STORE);
         if (chosenStore != null && !stores.contains(chosenStore)) chosenStore = null;
-        storeChoices.addView(storeChoice("自動判斷", null));
-        for (String store : stores) storeChoices.addView(storeChoice(store, store));
-        Button add = compactButton("＋ 新增賣場");
-        storeChoices.addView(add, new LinearLayout.LayoutParams(-2, dp(48)));
+        storeChoices.addView(storeChoice("自動判斷", null), ui.margins(-2, -2, 0, 0, 8, 0));
+        for (String store : stores) storeChoices.addView(storeChoice(store, store), ui.margins(-2, -2, 0, 0, 8, 0));
+        TextView add = ui.chip("＋ 新增", false);
+        add.setTextColor(ui.color(R.color.accent));
+        storeChoices.addView(add);
         add.setOnClickListener(v -> addStoreDialog(store -> {
             chosenStore = store;
             renderStoreChoices();
         }));
     }
 
-    private RadioButton storeChoice(String label, String store) {
-        RadioButton choice = new RadioButton(this);
-        choice.setText(label);
-        choice.setTextSize(16);
-        choice.setPadding(dp(4), dp(10), dp(14), dp(10));
-        choice.setChecked(store == null ? chosenStore == null : store.equals(chosenStore));
+    private TextView storeChoice(String label, String store) {
+        boolean selected = store == null ? chosenStore == null : store.equals(chosenStore);
+        TextView choice = ui.chip(selected ? "✓ " + label : label, selected);
+        choice.setContentDescription(label + (selected ? "，已選取" : ""));
         choice.setOnClickListener(v -> {
             chosenStore = store;
             renderStoreChoices();
@@ -680,10 +783,13 @@ public final class MainActivity extends Activity {
         imageGrid.removeAllViews();
         final long listId = activeListId();
         List<ShoppingDb.ImageRow> images = db.images(listId);
-        int width = (getResources().getDisplayMetrics().widthPixels - dp(48)) / 2;
+        // Screen padding 16 + card padding 14 on each side, and 4dp around each tile.
+        int width = (getResources().getDisplayMetrics().widthPixels - dp(2 * 16 + 2 * 14 + 4 * 4)) / 2;
         int number = 1;
         for (ShoppingDb.ImageRow image : images) {
-            FrameLayout card = new FrameLayout(this);
+            FrameLayout tile = new FrameLayout(this);
+            tile.setBackground(ui.shape(ui.color(R.color.field), Ui.RADIUS_ELEMENT, 0));
+            tile.setClipToOutline(true);
             GridLayout.LayoutParams params = new GridLayout.LayoutParams();
             params.width = width;
             params.height = width;
@@ -692,17 +798,21 @@ public final class MainActivity extends Activity {
             view.setScaleType(ImageView.ScaleType.CENTER_CROP);
             view.setImageBitmap(sample(image.path, width));
             view.setAlpha(image.done ? .35f : 1f);
-            card.addView(view, new FrameLayout.LayoutParams(-1, -1));
+            tile.addView(view, new FrameLayout.LayoutParams(-1, -1));
             CheckBox done = new CheckBox(this);
             done.setChecked(image.done);
             done.setContentDescription("商品圖片 " + number + (image.done ? " 已完成" : " 完成狀態"));
-            done.setScaleX(1.5f);
-            done.setScaleY(1.5f);
+            done.setScaleX(1.35f);
+            done.setScaleY(1.35f);
+            ui.tint(done);
             FrameLayout checkArea = new FrameLayout(this);
-            checkArea.setBackgroundColor(Color.argb(170, 255, 255, 255));
+            checkArea.setBackground(ui.shape(ui.color(R.color.card), Ui.RADIUS_FULL, 0));
+            checkArea.setElevation(dp(2));
             checkArea.addView(done, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
             checkArea.setOnClickListener(v -> done.toggle());
-            card.addView(checkArea, new FrameLayout.LayoutParams(dp(60), dp(60), Gravity.TOP | Gravity.END));
+            FrameLayout.LayoutParams checkParams = new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.TOP | Gravity.END);
+            checkParams.setMargins(0, dp(6), dp(6), 0);
+            tile.addView(checkArea, checkParams);
             done.setOnCheckedChangeListener((button, checked) -> {
                 db.toggleImage(listId, image.id, checked);
                 if (activeListId() == listId) renderImages();
@@ -712,14 +822,16 @@ public final class MainActivity extends Activity {
                 confirmDeleteImage(image, listId);
                 return true;
             });
-            imageGrid.addView(card, params);
+            imageGrid.addView(tile, params);
             number++;
         }
         if (images.isEmpty()) {
-            TextView empty = label("尚未加入圖片");
-            GridLayout.LayoutParams params = new GridLayout.LayoutParams();
-            params.columnSpec = GridLayout.spec(0, 2);
-            params.width = -1;
+            TextView empty = ui.text("尚未加入圖片", 14, R.color.text_disabled, false);
+            empty.setGravity(Gravity.CENTER);
+            empty.setPadding(0, dp(18), 0, dp(18));
+            empty.setBackground(ui.shape(ui.color(R.color.field), Ui.RADIUS_ELEMENT, 0));
+            GridLayout.LayoutParams params = new GridLayout.LayoutParams(GridLayout.spec(0), GridLayout.spec(0, 2, 1f));
+            params.width = 0;
             imageGrid.addView(empty, params);
         }
     }
@@ -730,7 +842,7 @@ public final class MainActivity extends Activity {
         EditText name = input("商品名稱", item.name);
         EditText quantity = input("數量", item.quantity);
         final String[] store = {ShoppingListModel.normalizeStore(item.store)};
-        Button storeButton = button("賣場：" + store[0] + "（點此更改）");
+        Button storeButton = ui.outlineButton("賣場：" + store[0] + "（點此更改）", R.color.text_primary);
         storeButton.setOnClickListener(v -> chooseStore(store[0], picked -> {
             store[0] = picked;
             storeButton.setText("賣場：" + picked + "（點此更改）");
@@ -775,11 +887,17 @@ public final class MainActivity extends Activity {
         undoBar.removeCallbacks(hideUndo);
         undoAction = action;
         if (message == null) {
-            undoBar.setVisibility(View.GONE);
+            undoBar.animate().alpha(0f).translationY(dp(24)).setDuration(150)
+                    .withEndAction(() -> undoBar.setVisibility(View.GONE)).start();
             return;
         }
         undoText.setText(message);
-        undoBar.setVisibility(View.VISIBLE);
+        if (undoBar.getVisibility() != View.VISIBLE) {
+            undoBar.setAlpha(0f);
+            undoBar.setTranslationY(dp(24));
+            undoBar.setVisibility(View.VISIBLE);
+        }
+        undoBar.animate().alpha(1f).translationY(0).setDuration(180).start();
         undoBar.postDelayed(hideUndo, 8000);
     }
 
@@ -1043,39 +1161,8 @@ public final class MainActivity extends Activity {
         return view;
     }
 
-    private Button button(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setMinHeight(dp(48));
-        return button;
-    }
-
-    private Button compactButton(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setTextSize(14);
-        button.setMinHeight(0);
-        button.setMinimumHeight(0);
-        button.setMinWidth(0);
-        button.setMinimumWidth(0);
-        button.setPadding(dp(8), 0, dp(8), 0);
-        return button;
-    }
-
-    private TextView title(String text, int size) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(Color.rgb(30, 55, 32));
-        view.setPadding(0, dp(10), 0, dp(7));
-        return view;
-    }
-
     private TextView label(String text) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(15);
-        view.setTextColor(Color.DKGRAY);
+        TextView view = ui.text(text, 15, R.color.text_secondary, false);
         view.setPadding(dp(6), dp(7), dp(6), dp(7));
         return view;
     }
@@ -1086,6 +1173,12 @@ public final class MainActivity extends Activity {
         edit.setText(value);
         edit.setSingleLine(true);
         return edit;
+    }
+
+    private LinearLayout.LayoutParams weighted(int leftMarginDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
+        params.leftMargin = dp(leftMarginDp);
+        return params;
     }
 
     private LinearLayout.LayoutParams matchWrap() { return new LinearLayout.LayoutParams(-1, -2); }
