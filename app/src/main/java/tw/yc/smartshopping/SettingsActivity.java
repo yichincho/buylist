@@ -3,7 +3,6 @@ package tw.yc.smartshopping;
 import android.app.Activity;
 import android.content.ClipboardManager;
 import android.content.SharedPreferences;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
 import android.widget.Button;
@@ -32,10 +31,12 @@ public final class SettingsActivity extends Activity {
     private String pendingGeminiInput;
     private String pendingDeepSeekInput;
     private boolean changingSelection;
+    private Ui ui;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        ui = new Ui(this);
         keyStore = new SecureKeyStore(this);
         settings = getSharedPreferences("shopping_settings", MODE_PRIVATE);
         activeProvider = AiProvider.resolve(settings.getString(PREF_PROVIDER, null));
@@ -46,8 +47,8 @@ public final class SettingsActivity extends Activity {
         root.setPadding(dp(20), dp(16), dp(20), dp(32));
         scroll.addView(root);
 
-        Button back = button("← 返回");
-        root.addView(back);
+        Button back = ui.textButton("← 返回", R.color.accent);
+        root.addView(back, new LinearLayout.LayoutParams(-2, dp(44)));
         back.setOnClickListener(view -> finish());
         root.addView(title("AI 服務設定", 28));
         root.addView(label("選擇要使用的 AI 服務"));
@@ -70,25 +71,35 @@ public final class SettingsActivity extends Activity {
         keyInput.setId(R.id.apiKeyInput);
         keyInput.setSingleLine(true);
         keyInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        root.addView(keyInput, matchWrap());
+        ui.styleField(keyInput);
+        root.addView(keyInput, ui.margins(-1, -2, 0, 6, 0, 2));
         root.addView(label("每位使用者需自行輸入 API Key；金鑰會使用 Android Keystore 加密保存。"));
         root.addView(label("Gemini 免費方案與配額依 Google 當前政策及專案設定而異。"));
 
         LinearLayout actions = row();
-        Button paste = button("貼上");
-        Button save = button("儲存");
-        Button clear = button("清除此服務金鑰");
-        actions.addView(paste, new LinearLayout.LayoutParams(0, -2, 1));
-        actions.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
-        actions.addView(clear, new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(actions);
+        Button paste = ui.tonalButton("貼上");
+        Button save = ui.primaryButton("儲存");
+        Button clear = ui.outlineButton("清除金鑰", R.color.negative);
+        actions.addView(paste, new LinearLayout.LayoutParams(0, dp(48), 1));
+        actions.addView(save, ui.margins(0, dp(48), 8, 0, 0, 0));
+        ((LinearLayout.LayoutParams) save.getLayoutParams()).weight = 1;
+        actions.addView(clear, ui.margins(0, dp(48), 8, 0, 0, 0));
+        ((LinearLayout.LayoutParams) clear.getLayoutParams()).weight = 1;
+        root.addView(actions, ui.margins(-1, -2, 0, 4, 0, 8));
 
-        Button test = button("測試連線");
-        root.addView(test, matchWrap());
+        Button test = ui.tonalButton("測試連線");
+        root.addView(test, new LinearLayout.LayoutParams(-1, dp(48)));
         Switch imageSearch = new Switch(this);
         imageSearch.setId(R.id.imageSearchSwitch);
         imageSearch.setText("顯示搜尋圖片功能");
         imageSearch.setTextSize(17);
+        imageSearch.setTextColor(ui.color(R.color.text_primary));
+        imageSearch.setThumbTintList(new android.content.res.ColorStateList(
+                new int[][]{{android.R.attr.state_checked}, {}},
+                new int[]{ui.color(R.color.accent), ui.color(R.color.card)}));
+        imageSearch.setTrackTintList(new android.content.res.ColorStateList(
+                new int[][]{{android.R.attr.state_checked}, {}},
+                new int[]{ui.color(R.color.accent_tonal), ui.color(R.color.border)}));
         imageSearch.setPadding(0, dp(20), 0, dp(8));
         imageSearch.setChecked(settings.getBoolean("image_search_enabled", false));
         root.addView(imageSearch, matchWrap());
@@ -121,6 +132,9 @@ public final class SettingsActivity extends Activity {
         radio.setText(text);
         radio.setId(id);
         radio.setTextSize(17);
+        radio.setTextColor(ui.color(R.color.text_primary));
+        radio.setMinHeight(dp(48));
+        ui.tint(radio);
         return radio;
     }
 
@@ -212,27 +226,14 @@ public final class SettingsActivity extends Activity {
         return view;
     }
 
-    private Button button(String text) {
-        Button button = new Button(this);
-        button.setText(text);
-        button.setMinHeight(dp(48));
-        return button;
-    }
-
     private TextView title(String text, int size) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(size);
-        view.setTextColor(Color.rgb(30, 50, 30));
+        TextView view = ui.text(text, size, R.color.text_primary, true);
         view.setPadding(0, dp(12), 0, dp(8));
         return view;
     }
 
     private TextView label(String text) {
-        TextView view = new TextView(this);
-        view.setText(text);
-        view.setTextSize(15);
-        view.setTextColor(Color.DKGRAY);
+        TextView view = ui.text(text, 15, R.color.text_secondary, false);
         view.setPadding(0, dp(8), 0, dp(8));
         return view;
     }
