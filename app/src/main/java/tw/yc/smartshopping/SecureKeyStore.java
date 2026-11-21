@@ -126,6 +126,7 @@ public final class SecureKeyStore {
     private AiProvider requireProvider(String providerId) {
         if (AiProvider.GEMINI.id().equals(providerId)) return AiProvider.GEMINI;
         if (AiProvider.DEEPSEEK.id().equals(providerId)) return AiProvider.DEEPSEEK;
+        if (AiProvider.NVIDIA.id().equals(providerId)) return AiProvider.NVIDIA;
         throw new IllegalArgumentException("Unsupported AI provider");
     }
 }
