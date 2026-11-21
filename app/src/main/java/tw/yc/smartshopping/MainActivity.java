@@ -343,9 +343,7 @@ public final class MainActivity extends Activity {
         status.setText("正在整理…");
         executor.execute(() -> {
             String key = keyStore.getForProvider(targetProvider.id());
-            DeepSeekClient.Result result = targetProvider == AiProvider.GEMINI
-                    ? new GeminiClient().organize(key, source)
-                    : DeepSeekClient.organize(key, source);
+            DeepSeekClient.Result result = ModelRouter.organize(this, targetProvider, key, source);
             String saveError = null;
             boolean appendSucceeded = false;
             if (!result.items.isEmpty()) {
@@ -1037,9 +1035,7 @@ public final class MainActivity extends Activity {
             String key = keyStore.getForProvider(targetProvider.id());
             DeepSeekClient.Result result = image == null
                     ? new DeepSeekClient.Result(new ArrayList<>(), true, "無法讀取截圖，請重新截圖後分享")
-                    : targetProvider == AiProvider.GEMINI
-                            ? new GeminiClient().organizeImage(key, image)
-                            : DeepSeekClient.organizeImage(key, image);
+                    : ModelRouter.organizeImage(this, targetProvider, key, image);
             String saveError = null;
             if (!result.items.isEmpty()) {
                 try {
