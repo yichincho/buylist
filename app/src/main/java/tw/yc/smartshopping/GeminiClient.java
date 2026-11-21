@@ -13,14 +13,17 @@ public final class GeminiClient {
     private static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
     private static final String BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     private final String baseUrl;
+    private final String model;
 
-    public GeminiClient() { this(DEFAULT_BASE_URL); }
+    public GeminiClient() { this(DEFAULT_BASE_URL, AiProvider.DEFAULT_MODEL); }
+    public GeminiClient(String baseUrl, String model) { this.baseUrl = baseUrl.replaceAll("/+$", ""); this.model = model; }
 
     public GeminiClient(String baseUrl) {
         if (baseUrl == null || baseUrl.trim().isEmpty()) throw new IllegalArgumentException("baseUrl is required");
         String value = baseUrl.trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
         this.baseUrl = value;
+        this.model = AiProvider.DEFAULT_MODEL;
     }
 
     public DeepSeekClient.Result organize(String key, String text) {
@@ -43,7 +46,7 @@ public final class GeminiClient {
     private DeepSeekClient.Result send(String key, String text, byte[] jpeg, String fallbackText) {
         HttpURLConnection connection = null;
         try {
-            URL url = new URL(baseUrl + "/v1beta/models/" + AiProvider.DEFAULT_MODEL + ":generateContent");
+            URL url = new URL(baseUrl + "/v1beta/models/" + model + ":generateContent");
             connection = (HttpURLConnection) url.openConnection();
             connection.setConnectTimeout(12000);
             connection.setReadTimeout(jpeg == null ? 30000 : 45000);
