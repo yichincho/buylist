@@ -25,6 +25,10 @@ public final class SettingsActivity extends Activity {
     private RadioGroup providerSelector;
     private RadioButton geminiOption;
     private RadioButton deepSeekOption;
+    private RadioButton nvidiaOption;
+    private android.widget.Spinner modelSelector;
+    private java.util.List<String> currentModels = new java.util.ArrayList<>();
+    private String pendingNvidiaInput;
     private TextView providerName;
     private TextView modelName;
     private AiProvider activeProvider;
@@ -60,12 +64,25 @@ public final class SettingsActivity extends Activity {
         deepSeekOption = radio(getString(R.string.provider_deepseek), R.id.deepSeekProviderOption);
         providerSelector.addView(geminiOption);
         providerSelector.addView(deepSeekOption);
+        nvidiaOption = radio("NVIDIA", ViewIds.next());
+        providerSelector.addView(nvidiaOption);
         root.addView(providerSelector, matchWrap());
 
         providerName = title("", 21);
         modelName = label("");
         root.addView(providerName);
         root.addView(modelName);
+        modelSelector = new android.widget.Spinner(this);
+        root.addView(modelSelector, matchWrap());
+        Button refreshModels = ui.tonalButton("更新線上模型清單");
+        root.addView(refreshModels, matchWrap());
+        refreshModels.setOnClickListener(v -> executor.execute(() -> { ModelCatalog.refresh(this); runOnUiThread(() -> { updateProviderFields(); toast("模型清單已更新（若網路失敗則使用快取）"); }); }));
+        modelSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+            public void onItemSelected(android.widget.AdapterView<?> parent, android.view.View view, int position, long id) {
+                if (position < currentModels.size()) settings.edit().putString("ai_model_" + activeProvider.id(), currentModels.get(position)).apply();
+            }
+        });
 
         keyInput = new EditText(this);
         keyInput.setId(R.id.apiKeyInput);
@@ -106,13 +123,13 @@ public final class SettingsActivity extends Activity {
         root.addView(label("預設關閉。開啟後才會在商品旁顯示搜尋圖片按鈕。"));
 
         changingSelection = true;
-        (activeProvider == AiProvider.GEMINI ? geminiOption : deepSeekOption).setChecked(true);
+        (activeProvider == AiProvider.GEMINI ? geminiOption : activeProvider == AiProvider.DEEPSEEK ? deepSeekOption : nvidiaOption).setChecked(true);
         changingSelection = false;
         updateProviderFields();
 
         providerSelector.setOnCheckedChangeListener((group, checkedId) -> {
             if (changingSelection) return;
-            AiProvider next = checkedId == R.id.deepSeekProviderOption ? AiProvider.DEEPSEEK : AiProvider.GEMINI;
+            AiProvider next = checkedId == nvidiaOption.getId() ? AiProvider.NVIDIA : checkedId == R.id.deepSeekProviderOption ? AiProvider.DEEPSEEK : AiProvider.GEMINI;
             if (next == activeProvider) return;
             rememberCurrentInput();
             activeProvider = next;
@@ -127,6 +144,7 @@ public final class SettingsActivity extends Activity {
         setContentView(scroll);
     }
 
+    private static final class ViewIds { static int next() { return android.view.View.generateViewId(); } }
     private RadioButton radio(String text, int id) {
         RadioButton radio = new RadioButton(this);
         radio.setText(text);
@@ -144,22 +162,35 @@ public final class SettingsActivity extends Activity {
             modelName.setText("模型：" + AiProvider.DEFAULT_MODEL);
             keyInput.setHint("貼上 Google AI Studio Gemini API Key");
             keyInput.setText(pendingGeminiInput != null ? pendingGeminiInput : value(keyStore.getForProvider(activeProvider.id())));
+        } else if (activeProvider == AiProvider.NVIDIA) {
+            providerName.setText("NVIDIA");
+            keyInput.setHint("貼上 NVIDIA API Key");
+            keyInput.setText(pendingNvidiaInput != null ? pendingNvidiaInput : value(keyStore.getForProvider(activeProvider.id())));
         } else {
             providerName.setText("DeepSeek");
             modelName.setText("模型：" + DeepSeekClient.MODEL);
             keyInput.setHint("貼上 DeepSeek API Key");
             keyInput.setText(pendingDeepSeekInput != null ? pendingDeepSeekInput : value(keyStore.getForProvider(activeProvider.id())));
         }
+        currentModels = ModelCatalog.models(this, activeProvider);
+        android.widget.ArrayAdapter<String> adapter = new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, currentModels);
+        modelSelector.setAdapter(adapter);
+        String savedModel = settings.getString("ai_model_" + activeProvider.id(), ModelCatalog.recommended(this, activeProvider));
+        int selected = currentModels.indexOf(savedModel);
+        modelSelector.setSelection(selected < 0 ? 0 : selected);
+        modelName.setText("模型：" + (selected < 0 ? currentModels.get(0) : savedModel));
         keyInput.setSelection(keyInput.getText().length());
     }
 
     private void rememberCurrentInput() {
         if (activeProvider == AiProvider.GEMINI) pendingGeminiInput = keyInput.getText().toString();
+        else if (activeProvider == AiProvider.NVIDIA) pendingNvidiaInput = keyInput.getText().toString();
         else pendingDeepSeekInput = keyInput.getText().toString();
     }
 
     private void setPendingInput(String value) {
         if (activeProvider == AiProvider.GEMINI) pendingGeminiInput = value;
+        else if (activeProvider == AiProvider.NVIDIA) pendingNvidiaInput = value;
         else pendingDeepSeekInput = value;
     }
 
@@ -190,7 +221,7 @@ public final class SettingsActivity extends Activity {
         keyStore.clearForProvider(activeProvider.id());
         setPendingInput("");
         keyInput.setText("");
-        toast(activeProvider == AiProvider.GEMINI ? "Gemini API Key 已清除" : "DeepSeek API Key 已清除");
+        toast(activeProvider.id() + " API Key 已清除");
     }
 
     private void testConnection(Button test) {
@@ -199,9 +230,7 @@ public final class SettingsActivity extends Activity {
         test.setEnabled(false);
         executor.execute(() -> {
             String key = keyStore.getForProvider(target.id());
-            String message = target == AiProvider.GEMINI
-                    ? new GeminiClient().test(key)
-                    : DeepSeekClient.test(key);
+            String message = ModelRouter.test(this, target, key);
             runOnUiThread(() -> {
                 test.setEnabled(true);
                 toast(message);
