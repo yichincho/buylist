@@ -16,15 +16,16 @@ public final class DeepSeekClient {
     public static final String MODEL = "deepseek-flash";
     private DeepSeekClient() {}
 
-    public static Result organize(String key, String source) {
+    public static Result organize(String key, String source) { return organize(key, source, MODEL, "https://api.deepseek.com"); }
+    public static Result organize(String key, String source, String model, String baseUrl) {
         if (key == null || key.trim().isEmpty()) return Result.fallback("尚未設定 API Key", source);
         HttpURLConnection connection = null;
         try {
-            connection = (HttpURLConnection) new URL("https://api.deepseek.com/chat/completions").openConnection();
+            connection = (HttpURLConnection) new URL(baseUrl.replaceAll("/+$", "") + "/chat/completions").openConnection();
             connection.setConnectTimeout(12000); connection.setReadTimeout(30000); connection.setRequestMethod("POST");
             connection.setRequestProperty("Authorization", "Bearer " + key.trim());
             connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true);
-            JSONObject request = new JSONObject(); request.put("model", MODEL); request.put("temperature", 0);
+            JSONObject request = new JSONObject(); request.put("model", model); request.put("temperature", 0);
             request.put("thinking", new JSONObject().put("type", "disabled"));
             request.put("response_format", new JSONObject().put("type", "json_object"));
             JSONArray messages = new JSONArray();
@@ -50,7 +51,8 @@ public final class DeepSeekClient {
         finally { if (connection != null) connection.disconnect(); }
     }
 
-    public static Result organizeImage(String key, byte[] jpeg) {
+    public static Result organizeImage(String key, byte[] jpeg) { return organizeImage(key, jpeg, MODEL, "https://api.deepseek.com"); }
+    public static Result organizeImage(String key, byte[] jpeg, String model, String baseUrl) {
         if (key == null || key.trim().isEmpty()) return new Result(new ArrayList<>(), true, "請先到設定輸入 DeepSeek API Key，再重新分享截圖");
         HttpURLConnection connection = null;
         try {
