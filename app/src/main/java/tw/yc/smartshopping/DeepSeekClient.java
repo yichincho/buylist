@@ -26,7 +26,7 @@ public final class DeepSeekClient {
             connection.setRequestProperty("Authorization", "Bearer " + key.trim());
             connection.setRequestProperty("Content-Type", "application/json"); connection.setDoOutput(true);
             JSONObject request = new JSONObject(); request.put("model", model); request.put("temperature", 0);
-            request.put("thinking", new JSONObject().put("type", "disabled"));
+            if (!baseUrl.contains("nvidia.com")) request.put("thinking", new JSONObject().put("type", "disabled"));
             request.put("response_format", new JSONObject().put("type", "json_object"));
             JSONArray messages = new JSONArray();
             messages.put(new JSONObject().put("role", "system").put("content", "你是繁體中文購物清單整理器。只輸出JSON：{items:[{name,quantity,store,category}]}。保留所有商品，不可臆測數量。store只用好市多、全聯或未指定；依商店及類別排序。"));
